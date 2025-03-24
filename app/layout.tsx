@@ -1,39 +1,27 @@
-import type { Metadata, Viewport } from "next";
-import { Open_Sans } from "next/font/google";
-import "./globals.css";
-import { ThemeProviders } from "@/components/providers";
+import './globals.css';
+import { Inter } from 'next/font/google';
+import { AuthProvider } from '@/lib/auth-context';
+import Navbar from '@/components/Navbar';
 
-const openSans = Open_Sans({
-  weight: ["400", "500", "700"],
-  style: ["normal", "italic"],
-  subsets: ["latin"],
-  variable: "--font-open-sans",
-});
+const inter = Inter({ subsets: ['latin'] });
 
-export const metadata: Metadata = {
-  title: "Image Editor",
-  description: "Edit images using Google DeepMind Gemini 2.0",
-};
-
-export const viewport: Viewport = {
-  themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "white" },
-    { media: "(prefers-color-scheme: dark)", color: "black" },
-  ],
+export const metadata = {
+  title: 'Image Editing App',
+  description: 'Next.js app with Gemini image editing capabilities',
 };
 
 export default function RootLayout({
   children,
-}: Readonly<{
+}: {
   children: React.ReactNode;
-}>) {
+}) {
   return (
-    <html lang="en" suppressHydrationWarning>
-      <body
-        className={`${openSans.className} antialiased bg-white dark:bg-slate-950`}
-        suppressHydrationWarning
-      >
-        <ThemeProviders>{children}</ThemeProviders>
+    <html lang="en">
+      <body className={inter.className}>
+        <AuthProvider>
+          <Navbar />
+          <main>{children}</main>
+        </AuthProvider>
       </body>
     </html>
   );

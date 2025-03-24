@@ -42,8 +42,22 @@ export function ImageUpload({ onImageSelect, currentImage }: ImageUploadProps) {
       reader.onload = (event) => {
         if (event.target && event.target.result) {
           const result = event.target.result as string;
-          console.log("Image loaded, length:", result.length);
-          onImageSelect(result);
+          console.log("Image loaded, type:", file.type);
+          console.log("Image loaded, size:", file.size);
+          console.log("Image data URL format:", result.substring(0, 50) + "...");
+          
+          // Validate the data URL format
+          if (!result.startsWith('data:') || !result.includes(';base64,')) {
+            console.error("Generated invalid data URL format");
+            // Try to force the correct format
+            const base64Data = result.includes(',') ? result.split(',')[1] : result;
+            const mimeType = file.type || 'image/jpeg';
+            const fixedDataUrl = `data:${mimeType};base64,${base64Data}`;
+            console.log("Fixed data URL format:", fixedDataUrl.substring(0, 50) + "...");
+            onImageSelect(fixedDataUrl);
+          } else {
+            onImageSelect(result);
+          }
         }
       };
       reader.onerror = (error) => {
