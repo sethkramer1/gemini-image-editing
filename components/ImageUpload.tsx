@@ -3,7 +3,7 @@
 import { useCallback, useState, useEffect } from "react";
 import { useDropzone } from "react-dropzone";
 import { Button } from "./ui/button";
-import { Upload as UploadIcon, Image as ImageIcon, X } from "lucide-react";
+import { Upload as UploadIcon, Image as ImageIcon, X, FileImage } from "lucide-react";
 
 interface ImageUploadProps {
   onImageSelect: (imageData: string) => void;
@@ -49,19 +49,11 @@ export function ImageUpload({ onImageSelect, currentImage }: ImageUploadProps) {
           // Validate the data URL format
           if (!result.startsWith('data:') || !result.includes(';base64,')) {
             console.error("Generated invalid data URL format");
-            // Try to force the correct format
-            const base64Data = result.includes(',') ? result.split(',')[1] : result;
-            const mimeType = file.type || 'image/jpeg';
-            const fixedDataUrl = `data:${mimeType};base64,${base64Data}`;
-            console.log("Fixed data URL format:", fixedDataUrl.substring(0, 50) + "...");
-            onImageSelect(fixedDataUrl);
-          } else {
-            onImageSelect(result);
+            return;
           }
+          
+          onImageSelect(result);
         }
-      };
-      reader.onerror = (error) => {
-        console.error("Error reading file:", error);
       };
       reader.readAsDataURL(file);
     },
@@ -71,11 +63,13 @@ export function ImageUpload({ onImageSelect, currentImage }: ImageUploadProps) {
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
     accept: {
-      "image/png": [".png"],
-      "image/jpeg": [".jpg", ".jpeg"]
+      'image/jpeg': [],
+      'image/png': [],
+      'image/gif': [],
+      'image/webp': []
     },
-    maxSize: 10 * 1024 * 1024, // 10MB
-    multiple: false
+    maxFiles: 1,
+    multiple: false,
   });
 
   const handleRemove = () => {
@@ -84,61 +78,62 @@ export function ImageUpload({ onImageSelect, currentImage }: ImageUploadProps) {
   };
 
   return (
-    <div className="w-full">
+    <div className="space-y-4">
       {!currentImage ? (
         <div
           {...getRootProps()}
-          className={`min-h-[150px] p-4 rounded-lg
-          ${isDragActive ? "bg-secondary/50" : "bg-secondary"}
-          transition-colors duration-200 ease-in-out hover:bg-secondary/50
-          border-2 border-dashed border-secondary
-          cursor-pointer flex items-center justify-center gap-4
-        `}
+          className={`
+            border-2 border-dashed rounded-xl p-8
+            flex flex-col items-center justify-center
+            transition-all duration-200
+            cursor-pointer
+            ${isDragActive 
+              ? "border-primary bg-primary/5" 
+              : "border-border hover:border-primary/50 hover:bg-secondary/50"}
+          `}
         >
           <input {...getInputProps()} />
-          <div className="flex flex-row items-center">
-            <UploadIcon className="w-8 h-8 text-primary mr-3 flex-shrink-0" />
-            <div className="">
-              <p className="text-sm font-medium text-foreground">
-                Drop your image here or click to browse
-              </p>
-              <p className="text-xs text-muted-foreground">
-                Maximum file size: 10MB
+          <div className="flex flex-col items-center text-center space-y-3">
+            <div className="p-3 bg-secondary rounded-full">
+              <FileImage className="h-8 w-8 text-primary" />
+            </div>
+            <div className="space-y-1">
+              <p className="font-medium">Drag and drop image here</p>
+              <p className="text-sm text-muted-foreground">
+                Supports JPG, PNG, GIF, and WebP
               </p>
             </div>
+            <Button
+              size="sm"
+              className="mt-4 hover-scale"
+            >
+              <UploadIcon className="h-4 w-4 mr-2" />
+              Select Image
+            </Button>
           </div>
         </div>
       ) : (
-        <div className="flex flex-col items-center p-4 rounded-lg bg-secondary">
-          <div className="flex w-full items-center mb-4">
-            <ImageIcon className="w-8 h-8 text-primary mr-3 flex-shrink-0" />
-            <div className="flex-grow min-w-0">
-              <p className="text-sm font-medium truncate text-foreground">
-                {selectedFile?.name || "Current Image"}
-              </p>
-              {selectedFile && (
-                <p className="text-xs text-muted-foreground">
-                  {formatFileSize(selectedFile?.size ?? 0)}
-                </p>
-              )}
-            </div>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={handleRemove}
-              className="flex-shrink-0 ml-2"
-            >
-              <X className="w-4 h-4" />
-              <span className="sr-only">Remove image</span>
-            </Button>
-          </div>
-          <div className="w-full overflow-hidden rounded-md">
+        <div className="relative group">
+          <div className="overflow-hidden rounded-lg shadow-md image-preview">
             <img
               src={currentImage}
-              alt="Selected"
-              className="w-full h-auto object-contain"
+              alt="Uploaded"
+              className="w-full h-auto object-cover transition-transform duration-300 group-hover:scale-105"
             />
           </div>
+          <Button
+            size="icon"
+            variant="destructive"
+            className="absolute top-2 right-2 opacity-90 hover:opacity-100 shadow-lg"
+            onClick={handleRemove}
+          >
+            <X className="h-5 w-5" />
+          </Button>
+          {selectedFile && (
+            <div className="bg-background/90 backdrop-blur-sm text-xs px-3 py-1.5 rounded-full absolute bottom-3 left-3 border border-border shadow-sm">
+              {selectedFile.name} ({formatFileSize(selectedFile.size)})
+            </div>
+          )}
         </div>
       )}
     </div>

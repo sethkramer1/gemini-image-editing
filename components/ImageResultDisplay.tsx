@@ -1,9 +1,9 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
-import { Download, RotateCcw, Copy } from "lucide-react";
+import { Download, RotateCcw, Copy, Share2, SaveAll, Sparkles, Clock, Loader2, FileImage, User } from "lucide-react";
 import { HistoryItem, HistoryPart } from "@/lib/types";
-import { useMemo, useEffect, useRef } from "react";
+import { useMemo, useEffect, useRef, useState } from "react";
 
 interface ImageResultDisplayProps {
   imageUrl: string;
@@ -15,6 +15,15 @@ interface ImageResultDisplayProps {
   isLoading?: boolean;
   loadingMessage?: string;
 }
+
+// Improved animations with fade-in effect for messages
+const fadeInAnimation = (delay: number = 0) => {
+  return {
+    animation: `fadeIn 0.3s ease forwards`,
+    animationDelay: `${delay}ms`,
+    opacity: 0
+  };
+};
 
 export function ImageResultDisplay({
   imageUrl,
@@ -28,6 +37,7 @@ export function ImageResultDisplay({
 }: ImageResultDisplayProps) {
   // Reference to the message container for auto-scrolling
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [copied, setCopied] = useState(false);
 
   // Function to scroll to bottom smoothly
   const scrollToBottom = () => {
@@ -37,7 +47,7 @@ export function ImageResultDisplay({
   };
 
   // Function to download any image
-  const handleDownloadImage = (imageUrl: string, fileName: string = "gemini-image") => {
+  const handleDownloadImage = (imageUrl: string, fileName: string = "imagecraft-edit") => {
     // Check if this is a URL rather than a data URL
     if (imageUrl.startsWith('http')) {
       console.log("Downloading image from URL:", imageUrl);
@@ -50,158 +60,237 @@ export function ImageResultDisplay({
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
-    } else {
-      // It's a data URL, download directly
-      const link = document.createElement("a");
-      link.href = imageUrl;
-      link.download = `${fileName}.png`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
+      return;
     }
+    
+    // For data URLs, we can directly trigger download
+    const link = document.createElement("a");
+    link.href = imageUrl;
+    link.download = `${fileName}.png`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
   
-  // Function to handle edit action (works with both data URLs and image URLs)
+  // Function to copy image to clipboard
+  const handleCopyToClipboard = async () => {
+    try {
+      // Fetch the image as a blob
+      const response = await fetch(imageUrl);
+      const blob = await response.blob();
+      
+      // Create a ClipboardItem and write to clipboard
+      const item = new ClipboardItem({ [blob.type]: blob });
+      await navigator.clipboard.write([item]);
+      
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy image: ', err);
+    }
+  };
+
+  // Auto-scroll on history updates
+  useEffect(() => {
+    if (conversationHistory.length > 0) {
+      scrollToBottom();
+    }
+  }, [conversationHistory]);
+
+  // Handle reset and new conversation actions
   const handleEditAction = () => {
     if (onNewConversation) {
       onNewConversation();
     }
   };
 
-  // Auto-scroll to bottom when new messages are added
-  useEffect(() => {
-    // Small delay to ensure content is rendered
-    const timeoutId = setTimeout(scrollToBottom, 100);
-    return () => clearTimeout(timeoutId);
-  }, [conversationHistory]);
-  
-  // Also auto-scroll when an AI response gets added (length changes from odd to even)
-  useEffect(() => {
-    // Only perform this check if we have messages and just received an AI response
-    if (conversationHistory.length > 0 && conversationHistory.length % 2 === 0) {
-      // This means we just received an AI response (user, then AI)
-      scrollToBottom();
-    }
-  }, [conversationHistory.length]);
-
-  // Group conversation messages by role - memoized to prevent recalculation on every render
-  const groupedConversation = useMemo(() => {
-    return conversationHistory.reduce<HistoryItem[][]>((acc, item, index) => {
-      if (index === 0 || item.role !== conversationHistory[index - 1].role) {
-        acc.push([item]);
-      } else {
-        acc[acc.length - 1].push(item);
-      }
-      return acc;
-    }, []);
-  }, [conversationHistory]);
-
-  // Check if this was an image that was uploaded by the user or not
+  // Check if an item is a user-uploaded image (typically the first image in conversation)
   const isUserUploadedImage = (item: HistoryItem, part: HistoryPart): boolean => {
-    // If it's the first message in the conversation and it's a user message with an image,
-    // it's likely an uploaded image that should be shown
-    const itemIndex = conversationHistory.indexOf(item);
-    return itemIndex <= 1 && item.role === "user";
+    return item.role === 'user' && !!part.image;
   };
 
-  // Check if it's the first user message in the conversation
+  // Check if this is the first user message in the conversation
   const isFirstUserMessage = (item: HistoryItem, conversationHistory: HistoryItem[]): boolean => {
-    // Find the index of the first user message in the conversation
-    const firstUserMessageIndex = conversationHistory.findIndex(msg => msg.role === "user");
-    // Check if the current item is that first user message
-    return conversationHistory.indexOf(item) === firstUserMessageIndex && item.role === "user";
+    return (
+      item.role === 'user' &&
+      conversationHistory.findIndex(h => h.role === 'user') === conversationHistory.indexOf(item)
+    );
+  };
+
+  // Format a fake timestamp for display purposes
+  const getMessageTime = (index: number): string => {
+    const now = new Date();
+    const minutes = Math.max(0, 10 - index * 2);
+    now.setMinutes(now.getMinutes() - minutes);
+    return now.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
   };
 
   return (
-    <div className="space-y-4">
-      {/* Conversation History in ChatGPT style */}
-      <div className="space-y-8 pb-4">
-        {groupedConversation.map((group, groupIndex) => {
-          const isUser = group[0].role === "user";
+    <div className="rounded-xl border border-border shadow-sm bg-card overflow-hidden">
+      {/* Main content area */}
+      <div className="p-1 sm:p-2 flex flex-col">
+        {/* Image display with action buttons*/}
+        <div className="rounded-lg overflow-hidden relative group">
+          <img 
+            src={imageUrl} 
+            alt={description || "Generated image"} 
+            className="w-full h-auto object-contain max-h-[70vh] image-preview"
+          />
           
-          return (
-            <div key={groupIndex} className="flex flex-col space-y-1">
-              <div className={`text-sm font-medium ${isUser ? "text-right" : "text-left"} px-2`}>
-                {isUser ? "You" : "Gemini"}
-              </div>
-              <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
-                <div className="flex flex-col space-y-2 max-w-[85%]">
-                  {group.map((item, itemIndex) => (
-                    <div 
-                      key={itemIndex}
-                      className={`rounded-lg p-4 ${
-                        isUser
-                          ? "bg-primary text-primary-foreground"
-                          : "bg-secondary"
-                      } ${itemIndex === 0 && isUser ? "rounded-tr-none" : ""} ${itemIndex === 0 && !isUser ? "rounded-tl-none" : ""}`}
-                    >
-                      <div className="space-y-3">
-                        {item.parts.map((part: HistoryPart, partIndex) => (
-                          <div key={partIndex}>
-                            {/* Always display text content regardless of user or model */}
-                            {part.text && (
-                              <p className="text-sm whitespace-pre-wrap">{part.text}</p>
-                            )}
-                            {/* For user messages, only show image if it's the first user message in the conversation */}
-                            {part.image && (!isUser || (isUser && isFirstUserMessage(item, conversationHistory))) && (
-                              <div className="mt-2 overflow-hidden rounded-md relative group">
-                                <img
-                                  src={part.image}
-                                  alt={isUser ? "User uploaded image" : "Generated image"}
-                                  className="max-w-full max-h-[400px] w-auto h-auto object-contain mx-auto"
-                                />
-                                {/* Control buttons overlay */}
-                                <div className="absolute top-2 right-2 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                  <Button 
-                                    variant="secondary" 
-                                    size="icon" 
-                                    className="h-8 w-8"
-                                    onClick={() => handleDownloadImage(part.image || "")}
-                                  >
-                                    <Download className="h-4 w-4" />
-                                  </Button>
-                                  {!isUser && isPastConversation && onNewConversation && (
-                                    <Button 
-                                      variant="secondary" 
-                                      size="icon" 
-                                      className="h-8 w-8"
-                                      onClick={handleEditAction}
-                                      title="Edit in New Chat"
-                                    >
-                                      <Copy className="h-4 w-4" />
-                                    </Button>
-                                  )}
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                </div>
+          {/* Image Action Buttons */}
+          <div className="absolute bottom-3 right-3 flex items-center space-x-2">
+            <Button
+              onClick={() => handleDownloadImage(imageUrl)}
+              size="sm"
+              variant="secondary"
+              className="rounded-full bg-background/80 backdrop-blur-sm hover:bg-background shadow-md border border-border/50 hover-scale"
+            >
+              <Download className="h-4 w-4 mr-1" />
+              <span>Save</span>
+            </Button>
+            
+            <Button
+              onClick={handleCopyToClipboard}
+              size="icon"
+              variant="secondary"
+              className="rounded-full size-8 bg-background/80 backdrop-blur-sm hover:bg-background shadow-md border border-border/50 hover-scale"
+            >
+              {copied ? <Sparkles className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
+            </Button>
+          </div>
+          
+          {/* Loading overlay */}
+          {isLoading && (
+            <div className="absolute inset-0 bg-background/50 backdrop-blur-sm flex flex-col items-center justify-center">
+              <div className="bg-card p-4 rounded-xl shadow-lg border border-border flex flex-col items-center space-y-3">
+                <Loader2 className="h-8 w-8 text-primary animate-spin" />
+                <p className="text-foreground font-medium">{loadingMessage}</p>
               </div>
             </div>
-          );
-        })}
+          )}
+        </div>
         
-        {/* Loading indicator - shown below the last message */}
-        {isLoading && (
-          <div className="flex justify-start mt-4">
-            <div className="bg-secondary rounded-lg p-4 max-w-[85%] flex items-center space-x-3 border border-primary/20 shadow-sm">
-              <div className="flex space-x-2">
-                <div className="w-3 h-3 bg-primary rounded-full animate-bounce" style={{ animationDelay: '0s' }}></div>
-                <div className="w-3 h-3 bg-primary rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
-                <div className="w-3 h-3 bg-primary rounded-full animate-bounce" style={{ animationDelay: '0.4s' }}></div>
-              </div>
-              <span className="text-sm font-medium ml-2">{loadingMessage}</span>
-            </div>
+        {/* Description text */}
+        {description && (
+          <div className="mt-3 px-3 py-2 bg-muted/30 rounded-lg border border-border/50">
+            <p className="text-sm text-foreground">{description}</p>
           </div>
         )}
         
-        {/* Invisible element at the bottom for auto-scrolling */}
-        <div ref={messagesEndRef} style={{ height: 20, width: '100%' }} />
+        {/* Action buttons */}
+        <div className="flex justify-between mt-4 px-1">
+          <Button 
+            onClick={onReset} 
+            variant="outline"
+            size="sm"
+            className="hover-scale border-border/60"
+          >
+            <RotateCcw className="h-4 w-4 mr-2" />
+            Reset
+          </Button>
+          
+          {onNewConversation && (
+            <Button
+              onClick={handleEditAction}
+              variant="default"
+              size="sm"
+              className="hover-scale"
+            >
+              <SaveAll className="h-4 w-4 mr-2" />
+              New with this image
+            </Button>
+          )}
+        </div>
       </div>
+      
+      {/* Optional history display */}
+      {conversationHistory.length > 0 && (
+        <div className="mt-4 border-t border-border bg-background/50 overflow-hidden">
+          <div className="pt-4 px-4 flex items-center justify-between">
+            <div className="flex items-center space-x-2">
+              <Clock className="h-4 w-4 text-primary/70" />
+              <h3 className="text-sm font-semibold">Conversation History</h3>
+            </div>
+            <div className="text-xs text-muted-foreground">
+              {conversationHistory.length} messages
+            </div>
+          </div>
+          
+          <div className="p-4 pt-2 space-y-4 max-h-[400px] overflow-y-auto"
+            style={{
+              scrollbarWidth: 'thin',
+              scrollbarColor: 'var(--border) transparent'
+            }}
+          >
+            {conversationHistory.map((item, itemIdx) => {
+              const isUser = item.role === 'user';
+              const hasImage = item.parts.some(part => part.image);
+              const delayOffset = itemIdx * 100; // Staggered animation
+              
+              return (
+                <div 
+                  key={itemIdx} 
+                  className={`flex ${isUser ? 'justify-end' : 'justify-start'} relative`}
+                  style={fadeInAnimation(delayOffset)}
+                >
+                  {/* Avatar/Icon */}
+                  {!isUser && (
+                    <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center mr-2 flex-shrink-0 mt-1 border border-primary/20">
+                      <Sparkles className="h-4 w-4 text-primary" />
+                    </div>
+                  )}
+                  
+                  <div className={`max-w-[85%] ${
+                    isUser 
+                      ? 'bg-gradient-to-br from-primary to-primary/90 text-primary-foreground rounded-t-lg rounded-bl-lg' 
+                      : 'bg-secondary text-secondary-foreground rounded-t-lg rounded-br-lg'
+                    } px-4 py-2.5 shadow-sm ${hasImage ? 'max-w-[380px]' : ''}`}
+                  >
+                    {item.parts.map((part, partIdx) => (
+                      <div key={partIdx}>
+                        {part.text && (
+                          <p className={`text-sm leading-relaxed ${isUser ? 'font-medium' : ''}`}>
+                            {part.text}
+                          </p>
+                        )}
+                        {part.image && (
+                          <div className="mt-2 mb-1 rounded-md overflow-hidden bg-black/5 shadow-inner border border-border/50">
+                            <img 
+                              src={part.image} 
+                              alt={`${isUser ? 'User' : 'AI'} image`}
+                              className="w-full h-auto max-h-[260px] object-contain"
+                              loading="lazy"
+                            />
+                            {isUserUploadedImage(item, part) && isFirstUserMessage(item, conversationHistory) && (
+                              <div className="bg-background/90 backdrop-blur-sm text-xs py-1.5 px-3 font-medium flex items-center justify-center border-t border-border/40">
+                                <FileImage className="h-3 w-3 text-primary mr-1.5" />
+                                Original uploaded image
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                    
+                    {/* Message timestamp */}
+                    <div className={`text-[10px] mt-1 flex items-center ${isUser ? 'text-primary-foreground/70 justify-end' : 'text-muted-foreground justify-start'}`}>
+                      {getMessageTime(itemIdx)}
+                    </div>
+                  </div>
+                  
+                  {/* User avatar */}
+                  {isUser && (
+                    <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center ml-2 flex-shrink-0 mt-1 border border-primary/20">
+                      <User className="h-4 w-4 text-primary/80" />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+            <div ref={messagesEndRef} className="h-4" />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

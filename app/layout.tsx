@@ -1,13 +1,17 @@
 import './globals.css';
-import { Inter } from 'next/font/google';
+import { Plus_Jakarta_Sans } from 'next/font/google';
+import { Providers } from '@/components/providers';
 import { AuthProvider } from '@/lib/auth-context';
 import Navbar from '@/components/Navbar';
 
-const inter = Inter({ subsets: ['latin'] });
+const plusJakarta = Plus_Jakarta_Sans({ 
+  subsets: ['latin'],
+  variable: '--font-plus-jakarta'
+});
 
 export const metadata = {
-  title: 'Image Editing App',
-  description: 'Next.js app with Gemini image editing capabilities',
+  title: 'Professional Image Editor',
+  description: 'Advanced Next.js app with AI-powered image editing capabilities',
 };
 
 export default function RootLayout({
@@ -16,12 +20,16 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
-      <body className={inter.className}>
-        <AuthProvider>
-          <Navbar />
-          <main>{children}</main>
-        </AuthProvider>
+    <html lang="en" suppressHydrationWarning>
+      <body className={`${plusJakarta.variable} font-sans antialiased`}>
+        <Providers>
+          <AuthProvider>
+            <div className="min-h-screen flex flex-col">
+              <Navbar />
+              <main className="flex-1">{children}</main>
+            </div>
+          </AuthProvider>
+        </Providers>
       </body>
     </html>
   );

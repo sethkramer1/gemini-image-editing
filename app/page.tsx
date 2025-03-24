@@ -3,7 +3,7 @@ import { useState, useEffect, useRef } from "react";
 import { ImageUpload } from "@/components/ImageUpload";
 import { ImagePromptInput } from "@/components/ImagePromptInput";
 import { ImageResultDisplay } from "@/components/ImageResultDisplay";
-import { ImageIcon, Wand2, RotateCcw, Plus } from "lucide-react";
+import { ImageIcon, Wand2, RotateCcw, Plus, Clock, Sparkles, FileImage, Download, Copy, User, Loader2, SaveAll } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { HistoryItem } from "@/lib/types";
 import { ChatSidebar, SidebarToggle } from "@/components/ChatSidebar";
@@ -50,6 +50,10 @@ export default function Home() {
   const currentImage = generatedImage || image;
   const isEditing = !!image || !!generatedImage;
   const displayImage = generatedImage;
+  
+  // New state
+  const [copied, setCopied] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
   
   // Auth redirect effect
   useEffect(() => {
@@ -572,6 +576,39 @@ export default function Home() {
     return imageUrl;
   };
 
+  // Function to check if an item is a user-uploaded image
+  const isUserUploadedImage = (item: HistoryItem, part: any): boolean => {
+    return item.role === 'user' && 'image' in part && !!part.image;
+  };
+
+  // Check if this is the first user message in the conversation
+  const isFirstUserMessage = (item: HistoryItem, history: HistoryItem[]): boolean => {
+    return (
+      item.role === 'user' &&
+      history.findIndex(h => h.role === 'user') === history.indexOf(item)
+    );
+  };
+
+  // Function to copy image to clipboard
+  const handleCopyToClipboard = async () => {
+    if (!displayImage) return;
+    
+    try {
+      // Fetch the image as a blob
+      const response = await fetch(displayImage);
+      const blob = await response.blob();
+      
+      // Create a ClipboardItem and write to clipboard
+      const item = new ClipboardItem({ [blob.type]: blob });
+      await navigator.clipboard.write([item]);
+      
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy image: ', err);
+    }
+  };
+
   // Render loading state if authentication is still loading
   if (authLoading || !user) {
     return (
@@ -588,7 +625,7 @@ export default function Home() {
 
   // Main UI render
   return (
-    <main className="min-h-screen flex items-center justify-center bg-background p-0">
+    <main className="min-h-screen flex items-center justify-center bg-[#0c0c0c] p-0">
       {/* Sidebar components */}
       <ChatSidebar 
         conversations={allConversations}
@@ -603,9 +640,9 @@ export default function Home() {
       
       <SidebarToggle onClick={toggleSidebar} expanded={sidebarExpanded} />
       
-      <div className={`transition-all duration-300 ${sidebarExpanded ? 'pl-64 md:pl-64' : 'pl-0'} w-full flex justify-center h-screen overflow-hidden`}>
-        <div className="w-full max-w-4xl flex flex-col h-full">
-          <header className="h-16 border-b flex items-center px-4 flex-shrink-0">
+      <div className={`transition-all duration-300 w-full flex justify-center h-screen overflow-hidden ${sidebarExpanded ? 'pl-72' : 'pl-0'}`}>
+        <div className="w-full max-w-7xl flex flex-col h-full">
+          <header className="h-16 border-b border-gray-800 flex items-center px-4 flex-shrink-0 bg-[#111111]">
             <Button 
               variant="ghost" 
               size="icon" 
@@ -615,74 +652,248 @@ export default function Home() {
             >
               <Plus className="h-4 w-4" />
             </Button>
-            <div className="flex items-center gap-2 text-foreground">
-              <Wand2 className="w-6 h-6 text-primary" />
-              <h1 className="text-xl font-semibold">Gemini Image Creation & Editing</h1>
+            <div className="flex items-center gap-2 text-white cursor-pointer" onClick={handleReset} title="New Chat">
+              <Wand2 className="w-6 h-6 text-blue-500" />
+              <h1 className="text-xl font-semibold">ImageCraft</h1>
             </div>
             <div className="ml-auto w-8" />
           </header>
           
-          <div className="flex-1 overflow-hidden relative">
-            <div ref={scrollContainerRef} className="absolute inset-0 overflow-y-auto pb-[140px]">
-              <div className="min-h-full flex flex-col justify-end">
-                <div className="p-4">
+          {history.length === 0 ? (
+            // Initial upload view when no history
+            <div className="flex-1 overflow-hidden relative">
+              <div 
+                ref={scrollContainerRef} 
+                className="absolute inset-0 overflow-y-auto px-4 scroll-smooth"
+                style={{
+                  scrollbarWidth: 'thin',
+                  scrollbarColor: 'var(--border) transparent'
+                }}
+              >
+                <div className="min-h-full flex flex-col justify-center py-8">
                   {error && (
-                    <div className="p-4 mb-4 text-sm text-red-700 bg-red-100 rounded-lg">
+                    <div className="p-4 mb-4 text-sm text-red-700 bg-red-100 rounded-lg shadow-sm border border-red-200">
                       {error}
                     </div>
                   )}
 
-                  {/* Show the upload view only if there's no history */}
-                  {history.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center min-h-[calc(100vh-8rem)]">
-                      <Card className="w-full max-w-4xl">
-                        <CardHeader className="pb-2">
-                          <CardTitle>Start by uploading an image or creating a new one</CardTitle>
-                        </CardHeader>
-                        <CardContent className="space-y-8">
-                          <ImageUpload
-                            onImageSelect={handleImageSelect}
-                            currentImage={currentImage}
-                          />
-                          <ImagePromptInput
-                            onSubmit={handlePromptSubmit}
-                            isEditing={isEditing}
-                            isLoading={loading}
-                          />
-                        </CardContent>
-                      </Card>
-                    </div>
-                  ) : (
-                    <>
-                      <ImageResultDisplay
-                        imageUrl={displayImage || ""}
-                        description={description}
-                        onReset={handleReset}
-                        onNewConversation={handleNewConversationWithCurrentImage}
-                        conversationHistory={history}
-                        isPastConversation={currentConversationIndex !== -1}
-                        isLoading={loading}
-                        loadingMessage={error?.includes("Loading image") 
-                          ? "Converting image for editing..." 
-                          : "Processing your request..."}
-                      />
-                    </>
-                  )}
+                  <div className="flex flex-col items-center justify-center">
+                    <Card className="w-full max-w-4xl shadow-lg">
+                      <CardHeader className="pb-2">
+                        <CardTitle>Start by uploading an image or creating a new one</CardTitle>
+                      </CardHeader>
+                      <CardContent className="space-y-8 pt-6">
+                        <ImageUpload
+                          onImageSelect={handleImageSelect}
+                          currentImage={currentImage}
+                        />
+                        <ImagePromptInput
+                          onSubmit={handlePromptSubmit}
+                          isEditing={isEditing}
+                          isLoading={loading}
+                        />
+                      </CardContent>
+                    </Card>
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
-          
-          {/* Fixed input area at the bottom when in chat mode */}
-          {history.length > 0 && (
-            <div className="fixed bottom-0 left-0 right-0 z-10 bg-background border-t shadow-md">
-              <div className={`transition-all duration-300 ${sidebarExpanded ? 'pl-64 md:pl-64' : 'pl-0'} w-full flex justify-center`}>
-                <div className="w-full max-w-4xl px-4 py-4">
-                  <ImagePromptInput
-                    onSubmit={handlePromptSubmit}
-                    isEditing={isEditing}
-                    isLoading={loading}
-                  />
+          ) : (
+            // Side-by-side layout when conversation has started
+            <div className="flex-1 flex overflow-hidden">
+              {/* Left side: Chat history and input */}
+              <div className="w-1/2 border-r border-gray-800 flex flex-col bg-[#111111] relative">
+                {/* Chat history */}
+                <div className="flex-1 overflow-hidden">
+                  <div 
+                    ref={scrollContainerRef} 
+                    className="absolute inset-0 overflow-y-auto px-4 scroll-smooth"
+                    style={{
+                      scrollbarWidth: 'thin',
+                      scrollbarColor: 'var(--border) transparent',
+                      paddingBottom: '130px'
+                    }}
+                  >
+                    <div className="min-h-full flex flex-col py-4">
+                      {error && (
+                        <div className="p-4 mb-4 text-sm text-red-700 bg-red-100 rounded-lg shadow-sm border border-red-200">
+                          {error}
+                        </div>
+                      )}
+                      
+                      {/* Conversation History Section */}
+                      <div className="pt-4 px-1 flex items-center justify-between">
+                        <div className="flex items-center space-x-2">
+                          <Clock className="h-4 w-4 text-primary/70" />
+                          <h3 className="text-sm font-semibold">Conversation History</h3>
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          {history.length} messages
+                        </div>
+                      </div>
+                      
+                      <div className="p-2 space-y-4"
+                        style={{
+                          scrollbarWidth: 'thin',
+                          scrollbarColor: 'var(--border) transparent'
+                        }}
+                      >
+                        {history.map((item, itemIdx) => {
+                          const isUser = item.role === 'user';
+                          const hasImage = item.parts.some(part => part.image);
+                          const delayOffset = itemIdx * 100; // Staggered animation
+                          
+                          return (
+                            <div 
+                              key={itemIdx} 
+                              className={`flex ${isUser ? 'justify-end' : 'justify-start'} relative`}
+                              style={fadeInAnimation(delayOffset)}
+                            >
+                              {/* Avatar/Icon */}
+                              {!isUser && (
+                                <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center mr-2 flex-shrink-0 mt-1 border border-primary/20">
+                                  <Sparkles className="h-4 w-4 text-primary" />
+                                </div>
+                              )}
+                              
+                              <div className={`${
+                                isUser 
+                                  ? 'bg-blue-600 text-white rounded-t-lg rounded-bl-lg' 
+                                  : 'bg-gray-800 text-white rounded-t-lg rounded-br-lg'
+                                } px-4 py-2.5 shadow-sm ${hasImage ? 'max-w-[300px]' : 'max-w-[85%]'}`}
+                              >
+                                {item.parts.map((part, partIdx) => (
+                                  <div key={partIdx}>
+                                    {part.text && (
+                                      <p className="text-sm leading-relaxed font-medium">
+                                        {part.text}
+                                      </p>
+                                    )}
+                                    {part.image && (
+                                      <div className="mt-2 mb-1 rounded-md overflow-hidden">
+                                        <img 
+                                          src={part.image} 
+                                          alt={`${isUser ? 'User' : 'AI'} image`}
+                                          className="w-full h-auto max-h-[180px] object-contain"
+                                          loading="lazy"
+                                        />
+                                      </div>
+                                    )}
+                                  </div>
+                                ))}
+                                
+                                {/* Message timestamp */}
+                                <div className="text-[10px] mt-1 text-gray-300 text-right">
+                                  {getMessageTime(itemIdx)}
+                                </div>
+                              </div>
+                              
+                              {/* User avatar */}
+                              {isUser && (
+                                <div className="w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center ml-2 flex-shrink-0 mt-1">
+                                  <User className="h-4 w-4 text-white" />
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                        <div ref={messagesEndRef} className="h-4" />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                
+                {/* Chat input fixed at bottom */}
+                <div className="absolute bottom-0 left-0 right-0 z-20 bg-[#111111] backdrop-blur-sm border-t border-gray-800 shadow-lg">
+                  <div className="w-full px-4 py-3">
+                    <ImagePromptInput
+                      onSubmit={handlePromptSubmit}
+                      isEditing={isEditing}
+                      isLoading={loading}
+                    />
+                  </div>
+                </div>
+              </div>
+              
+              {/* Right side: Current image display */}
+              <div className="w-1/2 flex flex-col bg-[#0c0c0c]">
+                <div className="flex-1 overflow-auto flex items-center justify-center p-6">
+                  <div className="h-full w-full flex flex-col">
+                    {/* Current image with loading state */}
+                    <div className="flex-1 overflow-hidden flex items-center justify-center relative p-4">
+                      <img 
+                        src={displayImage || ""} 
+                        alt={description || "Generated image"} 
+                        className="max-w-full max-h-full object-contain image-preview"
+                      />
+                      
+                      {/* Image Action Buttons */}
+                      <div className="absolute bottom-3 right-3 flex items-center space-x-2">
+                        <Button
+                          onClick={() => handleDownloadImage(displayImage || "")}
+                          size="sm"
+                          variant="secondary"
+                          className="rounded-full bg-background/80 backdrop-blur-sm hover:bg-background shadow-md border border-border/50 hover-scale"
+                        >
+                          <Download className="h-4 w-4 mr-1" />
+                          <span>Save</span>
+                        </Button>
+                        
+                        <Button
+                          onClick={handleCopyToClipboard}
+                          size="icon"
+                          variant="secondary"
+                          className="rounded-full size-8 bg-background/80 backdrop-blur-sm hover:bg-background shadow-md border border-border/50 hover-scale"
+                        >
+                          {copied ? <Sparkles className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
+                        </Button>
+                      </div>
+                      
+                      {/* Loading overlay */}
+                      {loading && (
+                        <div className="absolute inset-0 bg-background/50 backdrop-blur-sm flex flex-col items-center justify-center">
+                          <div className="bg-card p-4 rounded-xl shadow-lg border border-border flex flex-col items-center space-y-3">
+                            <Loader2 className="h-8 w-8 text-primary animate-spin" />
+                            <p className="text-foreground font-medium">
+                              {error?.includes("Loading image") 
+                                ? "Converting image for editing..." 
+                                : "Processing your request..."}
+                            </p>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                    
+                    {/* Description text */}
+                    {description && (
+                      <div className="mt-3 mx-4 px-3 py-2 bg-muted/30 rounded-lg border border-border/50">
+                        <p className="text-sm text-foreground">{description}</p>
+                      </div>
+                    )}
+                    
+                    {/* Action buttons */}
+                    <div className="flex justify-between mx-4 my-4">
+                      <Button 
+                        onClick={handleReset} 
+                        variant="outline"
+                        size="sm"
+                        className="hover-scale border-border/60"
+                      >
+                        <RotateCcw className="h-4 w-4 mr-2" />
+                        Reset
+                      </Button>
+                      
+                      <Button
+                        onClick={handleNewConversationWithCurrentImage}
+                        variant="default"
+                        size="sm"
+                        className="hover-scale"
+                      >
+                        <SaveAll className="h-4 w-4 mr-2" />
+                        New with this image
+                      </Button>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -692,3 +903,46 @@ export default function Home() {
     </main>
   );
 }
+
+// Helper function for fade-in animation
+const fadeInAnimation = (delay: number = 0) => {
+  return {
+    animation: `fadeIn 0.3s ease forwards`,
+    animationDelay: `${delay}ms`,
+    opacity: 0
+  };
+};
+
+// Format a timestamp for display purposes
+const getMessageTime = (index: number): string => {
+  const now = new Date();
+  const minutes = Math.max(0, 10 - index * 2);
+  now.setMinutes(now.getMinutes() - minutes);
+  return now.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+};
+
+// Helper function for downloading images
+const handleDownloadImage = (imageUrl: string, fileName: string = "imagecraft-edit") => {
+  if (!imageUrl) return;
+  
+  // Check if this is a URL rather than a data URL
+  if (imageUrl.startsWith('http')) {
+    // Create a temporary link to download the image
+    const link = document.createElement("a");
+    link.href = imageUrl;
+    link.download = `${fileName}.png`;
+    link.target = "_blank"; // Open in new tab for URL downloads
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    return;
+  }
+  
+  // For data URLs, we can directly trigger download
+  const link = document.createElement("a");
+  link.href = imageUrl;
+  link.download = `${fileName}.png`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+};
