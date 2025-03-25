@@ -10,7 +10,7 @@ interface AppShellProps {
 
 export function AppShell({ children, onNewProject }: AppShellProps) {
   return (
-    <div className="min-h-screen flex flex-col">
+    <div className="h-screen flex flex-col overflow-hidden">
       <Navbar onNewProject={onNewProject} />
       <main className="flex-1">{children}</main>
     </div>
