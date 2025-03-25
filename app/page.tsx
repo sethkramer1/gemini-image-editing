@@ -20,6 +20,7 @@ import { useAuth } from "@/lib/auth-context";
 import { useRouter } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
 import { flushSync } from 'react-dom';
+import { optimizeImage } from "@/lib/imageUtils";
 
 export default function Home() {
   // Image state
@@ -702,13 +703,31 @@ export default function Home() {
       console.log("Converting image URL to base64 for editing");
       const base64Image = await convertUrlToBase64(imageUrl);
       if (base64Image) {
-        // Update the state to use this converted image
-        if (imageUrl === generatedImage) {
-          setGeneratedImage(base64Image);
-        } else if (imageUrl === image) {
-          setImage(base64Image);
+        // Optimize the image after loading from URL
+        console.log("Optimizing image loaded from URL");
+        try {
+          const optimizedImage = await optimizeImage(base64Image, 1024, 0.85);
+          console.log("Image successfully optimized");
+          
+          // Update the state to use this optimized image
+          if (imageUrl === generatedImage) {
+            setGeneratedImage(optimizedImage);
+          } else if (imageUrl === image) {
+            setImage(optimizedImage);
+          }
+          
+          return optimizedImage;
+        } catch (error) {
+          console.error("Error optimizing image:", error);
+          
+          // Fall back to unoptimized image if optimization fails
+          if (imageUrl === generatedImage) {
+            setGeneratedImage(base64Image);
+          } else if (imageUrl === image) {
+            setImage(base64Image);
+          }
+          return base64Image;
         }
-        return base64Image;
       }
       return null;
     }

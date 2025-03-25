@@ -1,19 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } from "@google/generative-ai";
 import { HistoryItem, HistoryPart } from "@/lib/types";
+import { env } from "process";
+
+// Import the server-side image processing helper (for Node.js environment)
+import sharp from "sharp";
 
 // Initialize the Google Gen AI client with your API key
 // Try both environment variable names (the original and an alternative)
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.NEXT_GEMINI_API_KEY || "";
+const GEMINI_API_KEY = env.GEMINI_API_KEY || env.NEXT_GEMINI_API_KEY || "";
 // Debug log for environment variables
 console.log("Environment variable check on initialization:", {
   hasGeminiKey: !!GEMINI_API_KEY,
   keyLength: GEMINI_API_KEY ? GEMINI_API_KEY.length : 0,
   keyFirstChars: GEMINI_API_KEY ? GEMINI_API_KEY.substring(0, 5) + '...' : 'none',
-  allEnvKeys: Object.keys(process.env).filter(key => key.includes('GEMINI') || key.includes('API')),
+  allEnvKeys: Object.keys(env).filter(key => key.includes('GEMINI') || key.includes('API')),
   envVarSources: {
-    GEMINI_API_KEY: !!process.env.GEMINI_API_KEY,
-    NEXT_GEMINI_API_KEY: !!process.env.NEXT_GEMINI_API_KEY
+    GEMINI_API_KEY: !!env.GEMINI_API_KEY,
+    NEXT_GEMINI_API_KEY: !!env.NEXT_GEMINI_API_KEY
   }
 });
 const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
@@ -33,6 +37,61 @@ interface FormattedHistoryItem {
   }>;
 }
 
+// Server-side image optimization function
+async function optimizeImageServer(imageDataUrl: string, maxWidth = 1024, quality = 80): Promise<string> {
+  try {
+    // Extract base64 data and MIME type
+    const matches = imageDataUrl.match(/^data:([A-Za-z-+/]+);base64,(.+)$/);
+    if (!matches || matches.length !== 3) {
+      throw new Error("Invalid data URL format");
+    }
+    
+    const mimeType = matches[1];
+    const base64Data = matches[2];
+    const buffer = Buffer.from(base64Data, 'base64');
+    
+    // Process the image with Sharp
+    let processedBuffer;
+    const sharpImage = sharp(buffer);
+    const metadata = await sharpImage.metadata();
+    
+    // Only resize if image is larger than maxWidth
+    if (metadata.width && metadata.width > maxWidth) {
+      sharpImage.resize(maxWidth);
+    }
+    
+    // Choose output format based on input format
+    if (mimeType.includes('png')) {
+      processedBuffer = await sharpImage
+        .png({ quality, compressionLevel: 9 })
+        .toBuffer();
+    } else {
+      // Default to JPEG for better compression
+      processedBuffer = await sharpImage
+        .jpeg({ quality })
+        .toBuffer();
+    }
+    
+    // Convert back to data URL
+    const outputMimeType = mimeType.includes('png') ? 'image/png' : 'image/jpeg';
+    const optimizedDataUrl = `data:${outputMimeType};base64,${processedBuffer.toString('base64')}`;
+    
+    // Log size reduction
+    console.log(
+      "Image optimization:",
+      "original:", (buffer.length / 1024).toFixed(2), "KB,",
+      "optimized:", (processedBuffer.length / 1024).toFixed(2), "KB,",
+      "reduction:", Math.round((1 - processedBuffer.length / buffer.length) * 100) + "%"
+    );
+    
+    return optimizedDataUrl;
+  } catch (error) {
+    console.error("Image optimization error:", error);
+    // Return original if optimization fails
+    return imageDataUrl;
+  }
+}
+
 export async function POST(req: NextRequest) {
   let model = "imagen-3"; // Default model
   const isProduction = process.env.NODE_ENV === 'production';
@@ -42,7 +101,7 @@ export async function POST(req: NextRequest) {
   console.log("Environment check in POST handler:", {
     hasGeminiKey: !!GEMINI_API_KEY,
     keyLength: GEMINI_API_KEY ? GEMINI_API_KEY.length : 0,
-    allEnvKeys: Object.keys(process.env).filter(key => key.includes('GEMINI') || key.includes('API')),
+    allEnvKeys: Object.keys(env).filter(key => key.includes('GEMINI') || key.includes('API')),
     nodeEnv: process.env.NODE_ENV,
     isProduction
   });
@@ -346,7 +405,6 @@ export async function POST(req: NextRequest) {
         }
 
         try {
-          // Check if the image is a valid data URL - more robust check
           if (!inputImage || typeof inputImage !== 'string') {
             console.error("Invalid image input:", inputImage ? typeof inputImage : 'null');
             return NextResponse.json(
@@ -364,8 +422,12 @@ export async function POST(req: NextRequest) {
             );
           }
 
+          // Apply server-side optimization to ensure small file size
+          console.log("Optimizing image on server before sending to API...");
+          const optimizedImage = await optimizeImageServer(inputImage, 1024, 80);
+
           // Extract the base64 part after the comma
-          const base64Index = inputImage.indexOf(';base64,');
+          const base64Index = optimizedImage.indexOf(';base64,');
           if (base64Index === -1) {
             console.error("Invalid image data URL format - missing base64 marker");
             return NextResponse.json(
@@ -374,10 +436,10 @@ export async function POST(req: NextRequest) {
             );
           }
 
-          const base64Image = inputImage.substring(base64Index + 8);
+          const base64Image = optimizedImage.substring(base64Index + 8);
           
           // Determine MIME type from the data URL
-          const mimeMatch = inputImage.match(/data:([^;]+);base64,/);
+          const mimeMatch = optimizedImage.match(/data:([^;]+);base64,/);
           const mimeType = mimeMatch ? mimeMatch[1] : "image/jpeg";
           
           console.log(

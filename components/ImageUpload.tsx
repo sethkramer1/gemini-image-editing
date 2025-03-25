@@ -4,61 +4,89 @@ import { useCallback, useState, useEffect } from "react";
 import { useDropzone } from "react-dropzone";
 import { Button } from "./ui/button";
 import { Upload as UploadIcon, Image as ImageIcon, X, FileImage } from "lucide-react";
+import { optimizeImage, formatFileSize, getDataUrlSize } from "@/lib/imageUtils";
 
 interface ImageUploadProps {
   onImageSelect: (imageData: string) => void;
   currentImage: string | null;
 }
 
-export function formatFileSize(bytes: number): string {
-  if (bytes === 0) return "0 Bytes";
-  const k = 1024;
-  const sizes = ["Bytes", "KB", "MB", "GB", "TB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return (
-    Number.parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i]
-  );
-}
-
 export function ImageUpload({ onImageSelect, currentImage }: ImageUploadProps) {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [processingImage, setProcessingImage] = useState(false);
+  const [originalSize, setOriginalSize] = useState<number | null>(null);
+  const [optimizedSize, setOptimizedSize] = useState<number | null>(null);
 
   // Update the selected file when the current image changes
   useEffect(() => {
     if (!currentImage) {
       setSelectedFile(null);
+      setOriginalSize(null);
+      setOptimizedSize(null);
     }
   }, [currentImage]);
 
   const onDrop = useCallback(
-    (acceptedFiles: File[]) => {
+    async (acceptedFiles: File[]) => {
       const file = acceptedFiles[0];
       if (!file) return;
 
       setSelectedFile(file);
+      setProcessingImage(true);
 
-      // Convert the file to base64
+      try {
+        // Convert the file to base64
+        const originalDataUrl = await readFileAsDataURL(file);
+        
+        // Set original size
+        const origSize = getDataUrlSize(originalDataUrl);
+        setOriginalSize(origSize);
+        
+        console.log("Original image loaded, type:", file.type);
+        console.log("Original image size:", formatFileSize(origSize));
+        
+        // Optimize the image (resize and compress)
+        const optimizedDataUrl = await optimizeImage(originalDataUrl, 1024, 0.85);
+        
+        // Set optimized size
+        const optSize = getDataUrlSize(optimizedDataUrl);
+        setOptimizedSize(optSize);
+        
+        console.log("Optimized image size:", formatFileSize(optSize));
+        console.log("Size reduction:", Math.round((1 - optSize / origSize) * 100) + "%");
+        
+        // Provide the optimized image to the parent component
+        onImageSelect(optimizedDataUrl);
+      } catch (error) {
+        console.error("Error processing image:", error);
+      } finally {
+        setProcessingImage(false);
+      }
+    },
+    [onImageSelect]
+  );
+
+  // Helper function to read a file as data URL
+  const readFileAsDataURL = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = (event) => {
         if (event.target && event.target.result) {
           const result = event.target.result as string;
-          console.log("Image loaded, type:", file.type);
-          console.log("Image loaded, size:", file.size);
-          console.log("Image data URL format:", result.substring(0, 50) + "...");
           
           // Validate the data URL format
           if (!result.startsWith('data:') || !result.includes(';base64,')) {
-            console.error("Generated invalid data URL format");
+            reject(new Error("Generated invalid data URL format"));
             return;
           }
           
-          onImageSelect(result);
+          resolve(result);
         }
       };
+      reader.onerror = reject;
       reader.readAsDataURL(file);
-    },
-    [onImageSelect]
-  );
+    });
+  };
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
@@ -70,10 +98,13 @@ export function ImageUpload({ onImageSelect, currentImage }: ImageUploadProps) {
     },
     maxFiles: 1,
     multiple: false,
+    disabled: processingImage
   });
 
   const handleRemove = () => {
     setSelectedFile(null);
+    setOriginalSize(null);
+    setOptimizedSize(null);
     onImageSelect("");
   };
 
@@ -87,6 +118,7 @@ export function ImageUpload({ onImageSelect, currentImage }: ImageUploadProps) {
             flex flex-col items-center justify-center
             transition-all duration-200
             cursor-pointer
+            ${processingImage ? "opacity-70 pointer-events-none" : ""}
             ${isDragActive 
               ? "border-primary bg-primary/5" 
               : "border-border hover:border-primary/50 hover:bg-secondary/50"}
@@ -98,7 +130,11 @@ export function ImageUpload({ onImageSelect, currentImage }: ImageUploadProps) {
               <FileImage className="h-8 w-8 text-primary" />
             </div>
             <div className="space-y-1">
-              <p className="font-medium">Drag and drop image here</p>
+              <p className="font-medium">
+                {processingImage 
+                  ? "Optimizing image..." 
+                  : "Drag and drop image here"}
+              </p>
               <p className="text-sm text-muted-foreground">
                 Supports JPG, PNG, GIF, and WebP
               </p>
@@ -106,6 +142,7 @@ export function ImageUpload({ onImageSelect, currentImage }: ImageUploadProps) {
             <Button
               size="sm"
               className="mt-4 hover-scale"
+              disabled={processingImage}
             >
               <UploadIcon className="h-4 w-4 mr-2" />
               Select Image
@@ -131,7 +168,12 @@ export function ImageUpload({ onImageSelect, currentImage }: ImageUploadProps) {
           </Button>
           {selectedFile && (
             <div className="bg-background/90 backdrop-blur-sm text-xs px-3 py-1.5 rounded-full absolute bottom-3 left-3 border border-border shadow-sm">
-              {selectedFile.name} ({formatFileSize(selectedFile.size)})
+              {selectedFile.name} 
+              {originalSize && optimizedSize && (
+                <span className="opacity-80 ml-1">
+                  ({formatFileSize(optimizedSize)}, {Math.round((1 - optimizedSize / originalSize) * 100)}% smaller)
+                </span>
+              )}
             </div>
           )}
         </div>
