@@ -1,7 +1,7 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
-import { Download, RotateCcw, Copy, Share2, SaveAll, Sparkles, Clock, Loader2, FileImage, User } from "lucide-react";
+import { Download, RotateCcw, Copy, Share2, SaveAll, Sparkles, Clock, Loader2, FileImage, User, ChevronLeft, ChevronRight } from "lucide-react";
 import { HistoryItem, HistoryPart } from "@/lib/types";
 import { useMemo, useEffect, useRef, useState } from "react";
 
@@ -38,7 +38,62 @@ export function ImageResultDisplay({
   // Reference to the message container for auto-scrolling
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [copied, setCopied] = useState(false);
+  
+  // Image navigation state
+  const [currentImageIndex, setCurrentImageIndex] = useState(0);
+  const [imageHistory, setImageHistory] = useState<string[]>([]);
 
+  // Extract all images from the conversation history
+  useEffect(() => {
+    if (imageUrl && !imageHistory.includes(imageUrl)) {
+      setImageHistory(prev => [...prev, imageUrl]);
+      setCurrentImageIndex(prev => prev === 0 ? 0 : prev + 1);
+    }
+  }, [imageUrl]);
+
+  // Extract all images from conversation history
+  useEffect(() => {
+    if (conversationHistory.length > 0) {
+      const extractedImages: string[] = [];
+      
+      // Go through all conversation history and extract images
+      conversationHistory.forEach(item => {
+        item.parts.forEach(part => {
+          if ('image' in part && part.image && !extractedImages.includes(part.image)) {
+            extractedImages.push(part.image);
+          }
+        });
+      });
+      
+      // Add the current imageUrl if it's not already included
+      if (imageUrl && !extractedImages.includes(imageUrl)) {
+        extractedImages.push(imageUrl);
+      }
+      
+      if (extractedImages.length > 0) {
+        setImageHistory(extractedImages);
+        // Set to the last image (most recent)
+        setCurrentImageIndex(extractedImages.length - 1);
+      }
+    }
+  }, [conversationHistory, imageUrl]);
+
+  // Navigation functions
+  const goToPreviousImage = () => {
+    if (currentImageIndex > 0) {
+      setCurrentImageIndex(currentImageIndex - 1);
+    }
+  };
+
+  const goToNextImage = () => {
+    if (currentImageIndex < imageHistory.length - 1) {
+      setCurrentImageIndex(currentImageIndex + 1);
+    }
+  };
+
+  // The current image to display
+  const currentDisplayImage = imageHistory[currentImageIndex] || imageUrl;
+  
   // Function to scroll to bottom smoothly
   const scrollToBottom = () => {
     if (messagesEndRef.current) {
@@ -76,7 +131,7 @@ export function ImageResultDisplay({
   const handleCopyToClipboard = async () => {
     try {
       // Fetch the image as a blob
-      const response = await fetch(imageUrl);
+      const response = await fetch(currentDisplayImage);
       const blob = await response.blob();
       
       // Create a ClipboardItem and write to clipboard
@@ -126,171 +181,51 @@ export function ImageResultDisplay({
   };
 
   return (
-    <div className="rounded-xl border border-border shadow-sm bg-card overflow-hidden">
-      {/* Main content area */}
-      <div className="p-1 sm:p-2 flex flex-col">
-        {/* Image display with action buttons*/}
-        <div className="rounded-lg overflow-hidden relative group">
-          <img 
-            src={imageUrl} 
-            alt={description || "Generated image"} 
-            className="w-full h-auto object-contain max-h-[70vh] image-preview"
-          />
-          
-          {/* Image Action Buttons */}
-          <div className="absolute bottom-3 right-3 flex items-center space-x-2">
-            <Button
-              onClick={() => handleDownloadImage(imageUrl)}
-              size="sm"
-              variant="secondary"
-              className="rounded-full bg-background/80 backdrop-blur-sm hover:bg-background shadow-md border border-border/50 hover-scale"
-            >
-              <Download className="h-4 w-4 mr-1" />
-              <span>Save</span>
-            </Button>
-            
-            <Button
-              onClick={handleCopyToClipboard}
-              size="icon"
-              variant="secondary"
-              className="rounded-full size-8 bg-background/80 backdrop-blur-sm hover:bg-background shadow-md border border-border/50 hover-scale"
-            >
-              {copied ? <Sparkles className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
-            </Button>
-          </div>
-          
-          {/* Loading overlay */}
-          {isLoading && (
-            <div className="absolute inset-0 bg-background/50 backdrop-blur-sm flex flex-col items-center justify-center">
-              <div className="bg-card p-4 rounded-xl shadow-lg border border-border flex flex-col items-center space-y-3">
-                <Loader2 className="h-8 w-8 text-primary animate-spin" />
-                <p className="text-foreground font-medium">{loadingMessage}</p>
-              </div>
-            </div>
-          )}
-        </div>
+    <div className="flex flex-col relative w-full !p-0 !m-0 !border-0">
+      {/* Image display with overlaid controls */}
+      <div className="w-full relative !p-0 !m-0">
+        {/* Image */}
+        <img 
+          src={currentDisplayImage} 
+          alt={description || "Generated image"} 
+          className="w-full object-contain !max-h-[80vh]" 
+        />
         
-        {/* Description text */}
-        {description && (
-          <div className="mt-3 px-3 py-2 bg-muted/30 rounded-lg border border-border/50">
-            <p className="text-sm text-foreground">{description}</p>
-          </div>
-        )}
-        
-        {/* Action buttons */}
-        <div className="flex justify-between mt-4 px-1">
-          <Button 
-            onClick={onReset} 
-            variant="outline"
+        {/* Top navigation arrows */}
+        <div className="flex items-center justify-between absolute top-0 left-0 right-0 z-50">
+          <Button
+            onClick={goToPreviousImage}
             size="sm"
-            className="hover-scale border-border/60"
+            variant="ghost"
+            className="h-8 w-8 p-0 m-0 rounded-none bg-white/20 hover:bg-white/30 text-white shadow-md"
+            disabled={currentImageIndex <= 0}
           >
-            <RotateCcw className="h-4 w-4 mr-2" />
-            Reset
+            <ChevronLeft className="h-5 w-5" />
           </Button>
           
-          {onNewConversation && (
-            <Button
-              onClick={handleEditAction}
-              variant="default"
-              size="sm"
-              className="hover-scale"
-            >
-              <SaveAll className="h-4 w-4 mr-2" />
-              New with this image
-            </Button>
-          )}
+          <Button
+            onClick={goToNextImage}
+            size="sm"
+            variant="ghost"
+            className="h-8 w-8 p-0 m-0 rounded-none bg-white/20 hover:bg-white/30 text-white shadow-md"
+            disabled={currentImageIndex >= imageHistory.length - 1}
+          >
+            <ChevronRight className="h-5 w-5" />
+          </Button>
+        </div>
+        
+        {/* Save button directly at bottom */}
+        <div className="absolute bottom-0 left-0 right-0 z-50 flex justify-center">
+          <Button
+            onClick={() => handleDownloadImage(currentDisplayImage)}
+            size="sm"
+            variant="ghost"
+            className="rounded-none py-1 px-4 w-auto bg-white/20 hover:bg-white/30 text-white shadow-md"
+          >
+            <span>Save</span>
+          </Button>
         </div>
       </div>
-      
-      {/* Optional history display */}
-      {conversationHistory.length > 0 && (
-        <div className="mt-4 border-t border-border bg-background/50 overflow-hidden">
-          <div className="pt-4 px-4 flex items-center justify-between">
-            <div className="flex items-center space-x-2">
-              <Clock className="h-4 w-4 text-primary/70" />
-              <h3 className="text-sm font-semibold">Conversation History</h3>
-            </div>
-            <div className="text-xs text-muted-foreground">
-              {conversationHistory.length} messages
-            </div>
-          </div>
-          
-          <div className="p-4 pt-2 space-y-4 max-h-[400px] overflow-y-auto"
-            style={{
-              scrollbarWidth: 'thin',
-              scrollbarColor: 'var(--border) transparent'
-            }}
-          >
-            {conversationHistory.map((item, itemIdx) => {
-              const isUser = item.role === 'user';
-              const hasImage = item.parts.some(part => part.image);
-              const delayOffset = itemIdx * 100; // Staggered animation
-              
-              return (
-                <div 
-                  key={itemIdx} 
-                  className={`flex ${isUser ? 'justify-end' : 'justify-start'} relative`}
-                  style={fadeInAnimation(delayOffset)}
-                >
-                  {/* Avatar/Icon */}
-                  {!isUser && (
-                    <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center mr-2 flex-shrink-0 mt-1 border border-primary/20">
-                      <Sparkles className="h-4 w-4 text-primary" />
-                    </div>
-                  )}
-                  
-                  <div className={`max-w-[85%] ${
-                    isUser 
-                      ? 'bg-gradient-to-br from-primary to-primary/90 text-primary-foreground rounded-t-lg rounded-bl-lg' 
-                      : 'bg-secondary text-secondary-foreground rounded-t-lg rounded-br-lg'
-                    } px-4 py-2.5 shadow-sm ${hasImage ? 'max-w-[380px]' : ''}`}
-                  >
-                    {item.parts.map((part, partIdx) => (
-                      <div key={partIdx}>
-                        {part.text && (
-                          <p className={`text-sm leading-relaxed ${isUser ? 'font-medium' : ''}`}>
-                            {part.text}
-                          </p>
-                        )}
-                        {part.image && (
-                          <div className="mt-2 mb-1 rounded-md overflow-hidden bg-black/5 shadow-inner border border-border/50">
-                            <img 
-                              src={part.image} 
-                              alt={`${isUser ? 'User' : 'AI'} image`}
-                              className="w-full h-auto max-h-[260px] object-contain"
-                              loading="lazy"
-                            />
-                            {isUserUploadedImage(item, part) && isFirstUserMessage(item, conversationHistory) && (
-                              <div className="bg-background/90 backdrop-blur-sm text-xs py-1.5 px-3 font-medium flex items-center justify-center border-t border-border/40">
-                                <FileImage className="h-3 w-3 text-primary mr-1.5" />
-                                Original uploaded image
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                    
-                    {/* Message timestamp */}
-                    <div className={`text-[10px] mt-1 flex items-center ${isUser ? 'text-primary-foreground/70 justify-end' : 'text-muted-foreground justify-start'}`}>
-                      {getMessageTime(itemIdx)}
-                    </div>
-                  </div>
-                  
-                  {/* User avatar */}
-                  {isUser && (
-                    <div className="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center ml-2 flex-shrink-0 mt-1 border border-primary/20">
-                      <User className="h-4 w-4 text-primary/80" />
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-            <div ref={messagesEndRef} className="h-4" />
-          </div>
-        </div>
-      )}
     </div>
   );
 }

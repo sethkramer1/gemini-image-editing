@@ -3,7 +3,7 @@ import { useState, useEffect, useRef } from "react";
 import { ImageUpload } from "@/components/ImageUpload";
 import { ImagePromptInput } from "@/components/ImagePromptInput";
 import { ImageResultDisplay } from "@/components/ImageResultDisplay";
-import { ImageIcon, Wand2, RotateCcw, Plus, Clock, Sparkles, FileImage, Download, Copy, User, Loader2, SaveAll } from "lucide-react";
+import { ImageIcon, Wand2, RotateCcw, Plus, Clock, Sparkles, FileImage, Download, Copy, User, Loader2, SaveAll, ChevronLeft, ChevronRight } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { HistoryItem } from "@/lib/types";
 import { ChatSidebar, SidebarToggle } from "@/components/ChatSidebar";
@@ -63,6 +63,11 @@ export default function Home() {
   // New state
   const [copied, setCopied] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  
+  // Image navigation state
+  const [imageHistory, setImageHistory] = useState<string[]>([]);
+  const [currentImageIndex, setCurrentImageIndex] = useState(0);
   
   // Function to scroll to bottom immediately
   const scrollToBottom = () => {
@@ -209,6 +214,15 @@ export default function Home() {
           setLoadingInterval(null);
         }
         return;
+      }
+      
+      // If we got a processed image, update the state to use it
+      if (validatedImage && validatedImage !== imageToEdit) {
+        if (imageToEdit === generatedImage) {
+          setGeneratedImage(validatedImage);
+        } else if (imageToEdit === image) {
+          setImage(validatedImage);
+        }
       }
       
       // Determine if we're editing based on image or mode
@@ -397,6 +411,9 @@ export default function Home() {
     setHistory([]);
     setCurrentConversationIndex(-1);
     setCurrentConversationId(null);
+    // Reset image navigation
+    setImageHistory([]);
+    setCurrentImageIndex(0);
   };
   
   const handleNewConversationWithCurrentImage = () => {
@@ -642,8 +659,6 @@ export default function Home() {
     }
   };
 
-  const scrollContainerRef = useRef<HTMLDivElement>(null);
-
   // Add effect to scroll to bottom when history changes
   useEffect(() => {
     if (scrollContainerRef.current) {
@@ -715,23 +730,12 @@ export default function Home() {
           const optimizedImage = await optimizeImage(base64Image, 1024, 0.85);
           console.log("Image successfully optimized");
           
-          // Update the state to use this optimized image
-          if (imageUrl === generatedImage) {
-            setGeneratedImage(optimizedImage);
-          } else if (imageUrl === image) {
-            setImage(optimizedImage);
-          }
-          
+          // Return the optimized image without updating state here
           return optimizedImage;
         } catch (error) {
           console.error("Error optimizing image:", error);
           
           // Fall back to unoptimized image if optimization fails
-          if (imageUrl === generatedImage) {
-            setGeneratedImage(base64Image);
-          } else if (imageUrl === image) {
-            setImage(base64Image);
-          }
           return base64Image;
         }
       }
@@ -754,13 +758,14 @@ export default function Home() {
     );
   };
 
-  // Function to copy image to clipboard
+  // Function to copy the current image to clipboard
   const handleCopyToClipboard = async () => {
-    if (!displayImage) return;
-    
     try {
+      // Get the current image to copy
+      const imageToCopy = imageHistory[currentImageIndex] || displayImage;
+      
       // Fetch the image as a blob
-      const response = await fetch(displayImage);
+      const response = await fetch(imageToCopy);
       const blob = await response.blob();
       
       // Create a ClipboardItem and write to clipboard
@@ -771,6 +776,7 @@ export default function Home() {
       setTimeout(() => setCopied(false), 2000);
     } catch (err) {
       console.error('Failed to copy image: ', err);
+      setError('Failed to copy image to clipboard');
     }
   };
 
@@ -778,6 +784,61 @@ export default function Home() {
   useEffect(() => {
     console.log('Loading state changed:', loading);
   }, [loading]);
+
+  // Navigation functions
+  const goToPreviousImage = () => {
+    if (currentImageIndex > 0) {
+      setCurrentImageIndex(currentImageIndex - 1);
+    }
+  };
+
+  const goToNextImage = () => {
+    if (currentImageIndex < imageHistory.length - 1) {
+      setCurrentImageIndex(currentImageIndex + 1);
+    }
+  };
+
+  // Update image history when new images are added to conversation history
+  useEffect(() => {
+    if (history.length > 0) {
+      const extractedImages: string[] = [];
+      
+      // Extract images from conversation history
+      history.forEach(item => {
+        item.parts.forEach(part => {
+          if ('image' in part && part.image && !extractedImages.includes(part.image)) {
+            extractedImages.push(part.image);
+          }
+        });
+      });
+      
+      // Only update if we have new images and avoid infinite loop by not depending on imageHistory
+      const hasNewImages = extractedImages.length > 0 && 
+        (extractedImages.length !== imageHistory.length || 
+        extractedImages.some(img => !imageHistory.includes(img)));
+        
+      if (hasNewImages) {
+        setImageHistory(extractedImages);
+        setCurrentImageIndex(extractedImages.length - 1);
+      }
+    }
+  }, [history]); // Remove imageHistory dependency to prevent infinite loop
+
+  // Update image history when a new image is generated - in a separate effect
+  useEffect(() => {
+    if (generatedImage) {
+      setImageHistory(prev => {
+        // Only add if not already in the array
+        if (prev.indexOf(generatedImage) === -1) {
+          const newHistory = [...prev, generatedImage];
+          // Update the current index in a way that doesn't depend on the previous state
+          setCurrentImageIndex(newHistory.length - 1);
+          return newHistory;
+        }
+        return prev;
+      });
+    }
+  }, [generatedImage]); // Only depend on generatedImage
 
   // Render loading state if authentication is still loading
   if (authLoading || !user) {
@@ -1038,53 +1099,69 @@ export default function Home() {
                 
                 {/* Right side: Current image display */}
                 <div className="w-1/2 flex flex-col bg-[#0c0c0c]">
-                  <div className="flex-1 overflow-auto flex items-center justify-center p-6">
-                    <div className="h-full w-full flex flex-col">
-                      {/* Current image with loading state */}
-                      <div className="flex-1 overflow-hidden flex items-center justify-center relative p-4">
+                  <div className="flex-1 overflow-hidden flex items-center justify-center p-0 m-0">
+                    <div className="w-full h-full flex flex-col p-0 m-0">
+                      {/* Current image with loading state - remove padding */}
+                      <div className="flex-1 flex items-center justify-center relative overflow-visible px-12 m-0">
                         {displayImage ? (
-                          <img 
-                            src={displayImage} 
-                            alt={description || "Generated image"} 
-                            className="max-w-full max-h-full object-contain image-preview"
-                            onLoad={() => {
-                              // Scroll to bottom immediately after image loads
-                              if (scrollContainerRef.current) {
-                                scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
-                              }
-                              if (messagesEndRef.current) {
-                                messagesEndRef.current.scrollIntoView({ behavior: 'auto', block: 'end' });
-                              }
-                            }}
-                          />
+                          <div className="relative inline-block flex flex-col">
+                            {/* Navigation Controls above image */}
+                            <div className="flex items-center justify-between mb-4">
+                              <Button
+                                onClick={goToPreviousImage}
+                                size="icon"
+                                variant="ghost"
+                                className="h-12 w-12 bg-transparent hover:bg-white/10 text-white"
+                                disabled={currentImageIndex <= 0 || imageHistory.length <= 1}
+                              >
+                                <ChevronLeft className="h-8 w-8" />
+                              </Button>
+                              
+                              <Button
+                                onClick={goToNextImage}
+                                size="icon"
+                                variant="ghost"
+                                className="h-12 w-12 bg-transparent hover:bg-white/10 text-white"
+                                disabled={currentImageIndex >= imageHistory.length - 1 || imageHistory.length <= 1}
+                              >
+                                <ChevronRight className="h-8 w-8" />
+                              </Button>
+                            </div>
+                            
+                            {/* Image */}
+                            <div>
+                              <img 
+                                src={imageHistory[currentImageIndex] || displayImage} 
+                                alt={description || "Generated image"} 
+                                className="block object-contain max-h-[calc(100vh-120px)] max-w-full"
+                                onLoad={() => {
+                                  // Scroll to bottom immediately after image loads
+                                  if (scrollContainerRef.current) {
+                                    scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
+                                  }
+                                  if (messagesEndRef.current) {
+                                    messagesEndRef.current.scrollIntoView({ behavior: 'auto', block: 'end' });
+                                  }
+                                }}
+                              />
+                            </div>
+                            
+                            {/* Save Button below image */}
+                            <div className="flex items-center justify-center mt-4">
+                              <Button
+                                onClick={() => handleDownloadImage(imageHistory[currentImageIndex] || displayImage)}
+                                size="lg"
+                                variant="ghost"
+                                className="py-2 px-6 bg-transparent hover:bg-white/10 text-white text-lg"
+                              >
+                                <span>Save</span>
+                              </Button>
+                            </div>
+                          </div>
                         ) : (
                           <div className="text-gray-500 flex flex-col items-center justify-center">
                             <FileImage className="h-16 w-16 mb-4 opacity-20" />
                             <p>No image to display</p>
-                          </div>
-                        )}
-                        
-                        {/* Image Action Buttons */}
-                        {displayImage && (
-                          <div className="absolute bottom-3 right-3 flex items-center space-x-2">
-                            <Button
-                              onClick={() => handleDownloadImage(displayImage)}
-                              size="sm"
-                              variant="secondary"
-                              className="rounded-full bg-background/80 backdrop-blur-sm hover:bg-background shadow-md border border-border/50 hover-scale"
-                            >
-                              <Download className="h-4 w-4 mr-1" />
-                              <span>Save</span>
-                            </Button>
-                            
-                            <Button
-                              onClick={handleCopyToClipboard}
-                              size="icon"
-                              variant="secondary"
-                              className="rounded-full size-8 bg-background/80 backdrop-blur-sm hover:bg-background shadow-md border border-border/50 hover-scale"
-                            >
-                              {copied ? <Sparkles className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
-                            </Button>
                           </div>
                         )}
                         
@@ -1104,14 +1181,14 @@ export default function Home() {
                             </div>
                           </div>
                         )}
+                        
+                        {/* Description text */}
+                        {description && (
+                          <div className="mt-3 mx-4 px-3 py-2 bg-muted/30 rounded-lg border border-border/50">
+                            <p className="text-sm text-foreground">{description}</p>
+                          </div>
+                        )}
                       </div>
-                      
-                      {/* Description text */}
-                      {description && (
-                        <div className="mt-3 mx-4 px-3 py-2 bg-muted/30 rounded-lg border border-border/50">
-                          <p className="text-sm text-foreground">{description}</p>
-                        </div>
-                      )}
                     </div>
                   </div>
                 </div>
