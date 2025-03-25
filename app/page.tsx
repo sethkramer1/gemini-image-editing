@@ -25,6 +25,9 @@ export default function Home() {
   const [generatedImage, setGeneratedImage] = useState<string | null>(null);
   const [description, setDescription] = useState<string | null>(null);
   
+  // Mode selection state
+  const [mode, setMode] = useState("create");
+  
   // Loading state
   const [loading, setLoading] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -48,7 +51,7 @@ export default function Home() {
   
   // Derived properties - no state change
   const currentImage = generatedImage || image;
-  const isEditing = !!image || !!generatedImage;
+  const isEditing = !!image || !!generatedImage || mode === "edit";
   const displayImage = generatedImage;
   
   // New state
@@ -110,7 +113,7 @@ export default function Home() {
     setError("Request canceled by user.");
   };
 
-  const handlePromptSubmit = async (prompt: string) => {
+  const handlePromptSubmit = async (prompt: string, model?: string, aspectRatio?: string) => {
     try {
       // Reset any previous errors
       setError(null);
@@ -118,11 +121,13 @@ export default function Home() {
       // Set loading state
       setLoading(true);
       
-      // Start tracking loading time
+      // Start tracking loading time with millisecond precision
       setLoadingTime(0);
+      const startTime = Date.now();
       const interval = setInterval(() => {
-        setLoadingTime(prev => prev + 1);
-      }, 1000);
+        const elapsedSeconds = (Date.now() - startTime) / 1000;
+        setLoadingTime(elapsedSeconds);
+      }, 100); // Update 10 times per second
       setLoadingInterval(interval);
       
       // Set a timeout in case the API takes too long
@@ -139,6 +144,17 @@ export default function Home() {
       console.log("Submitting prompt:", prompt);
       console.log("Image editing mode:", isEditing);
       console.log("Has image to edit:", !!imageToEdit);
+      console.log("Model:", model || "imagen-3 (default)");
+      if (model === "imagen-3" && aspectRatio) {
+        console.log("Aspect ratio selected:", aspectRatio);
+        // Validate the aspect ratio
+        const validAspectRatios = ["1:1", "3:4", "4:3", "9:16", "16:9"];
+        if (!validAspectRatios.includes(aspectRatio)) {
+          console.warn(`Invalid aspect ratio: ${aspectRatio}, defaulting to 1:1`);
+          aspectRatio = "1:1";
+        }
+        console.log("Final aspect ratio being used:", aspectRatio);
+      }
       
       // Preprocess the image (convert URL to base64 if needed)
       const validatedImage = await preprocessImage(imageToEdit);
@@ -152,6 +168,9 @@ export default function Home() {
         }
         return;
       }
+      
+      // Determine if we're editing based on image or mode
+      const isEditingForApi = !!validatedImage || mode === "edit";
       
       // Create user message to add to history
       const userMessage: HistoryItem = {
@@ -176,7 +195,9 @@ export default function Home() {
         prompt,
         image: validatedImage,
         history: updatedHistory, // Use the updated history with user message
-        isEditing
+        isEditing: isEditingForApi,
+        model: model || "imagen-3", // Pass the model parameter with imagen-3 as default
+        aspectRatio // Pass the aspect ratio parameter
       };
 
       const response = await fetch("/api/image", {
@@ -680,16 +701,50 @@ export default function Home() {
                   <div className="flex flex-col items-center justify-center">
                     <Card className="w-full max-w-4xl shadow-lg">
                       <CardHeader className="pb-2">
-                        <CardTitle>Start by uploading an image or creating a new one</CardTitle>
+                        <CardTitle>
+                          {mode === "create" 
+                            ? "Create a new image with AI" 
+                            : "Upload an image to edit with AI"}
+                        </CardTitle>
                       </CardHeader>
                       <CardContent className="space-y-8 pt-6">
-                        <ImageUpload
-                          onImageSelect={handleImageSelect}
-                          currentImage={currentImage}
-                        />
+                        {/* Mode Selection Tabs */}
+                        <div className="flex bg-[#111111] border border-gray-800 rounded-lg p-1">
+                          <button
+                            onClick={() => setMode("create")}
+                            className={`flex-1 py-2 rounded-md text-sm font-medium transition-colors ${
+                              mode === "create" 
+                                ? "bg-blue-600 text-white" 
+                                : "text-gray-400 hover:text-white"
+                            }`}
+                          >
+                            <Wand2 className="h-4 w-4 inline-block mr-2" />
+                            Create new image
+                          </button>
+                          <button
+                            onClick={() => setMode("edit")}
+                            className={`flex-1 py-2 rounded-md text-sm font-medium transition-colors ${
+                              mode === "edit" 
+                                ? "bg-blue-600 text-white" 
+                                : "text-gray-400 hover:text-white"
+                            }`}
+                          >
+                            <ImageIcon className="h-4 w-4 inline-block mr-2" />
+                            Edit existing image
+                          </button>
+                        </div>
+                        
+                        {/* Only show image upload in edit mode */}
+                        {mode === "edit" && (
+                          <ImageUpload
+                            onImageSelect={handleImageSelect}
+                            currentImage={currentImage}
+                          />
+                        )}
+                        
                         <ImagePromptInput
                           onSubmit={handlePromptSubmit}
-                          isEditing={isEditing}
+                          isEditing={isEditing || mode === "edit"}
                           isLoading={loading}
                         />
                       </CardContent>
@@ -808,7 +863,7 @@ export default function Home() {
                   <div className="w-full px-4 py-3">
                     <ImagePromptInput
                       onSubmit={handlePromptSubmit}
-                      isEditing={isEditing}
+                      isEditing={isEditing || mode === "edit"}
                       isLoading={loading}
                     />
                   </div>
@@ -821,33 +876,42 @@ export default function Home() {
                   <div className="h-full w-full flex flex-col">
                     {/* Current image with loading state */}
                     <div className="flex-1 overflow-hidden flex items-center justify-center relative p-4">
-                      <img 
-                        src={displayImage || ""} 
-                        alt={description || "Generated image"} 
-                        className="max-w-full max-h-full object-contain image-preview"
-                      />
+                      {displayImage ? (
+                        <img 
+                          src={displayImage} 
+                          alt={description || "Generated image"} 
+                          className="max-w-full max-h-full object-contain image-preview"
+                        />
+                      ) : (
+                        <div className="text-gray-500 flex flex-col items-center justify-center">
+                          <FileImage className="h-16 w-16 mb-4 opacity-20" />
+                          <p>No image to display</p>
+                        </div>
+                      )}
                       
                       {/* Image Action Buttons */}
-                      <div className="absolute bottom-3 right-3 flex items-center space-x-2">
-                        <Button
-                          onClick={() => handleDownloadImage(displayImage || "")}
-                          size="sm"
-                          variant="secondary"
-                          className="rounded-full bg-background/80 backdrop-blur-sm hover:bg-background shadow-md border border-border/50 hover-scale"
-                        >
-                          <Download className="h-4 w-4 mr-1" />
-                          <span>Save</span>
-                        </Button>
-                        
-                        <Button
-                          onClick={handleCopyToClipboard}
-                          size="icon"
-                          variant="secondary"
-                          className="rounded-full size-8 bg-background/80 backdrop-blur-sm hover:bg-background shadow-md border border-border/50 hover-scale"
-                        >
-                          {copied ? <Sparkles className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
-                        </Button>
-                      </div>
+                      {displayImage && (
+                        <div className="absolute bottom-3 right-3 flex items-center space-x-2">
+                          <Button
+                            onClick={() => handleDownloadImage(displayImage)}
+                            size="sm"
+                            variant="secondary"
+                            className="rounded-full bg-background/80 backdrop-blur-sm hover:bg-background shadow-md border border-border/50 hover-scale"
+                          >
+                            <Download className="h-4 w-4 mr-1" />
+                            <span>Save</span>
+                          </Button>
+                          
+                          <Button
+                            onClick={handleCopyToClipboard}
+                            size="icon"
+                            variant="secondary"
+                            className="rounded-full size-8 bg-background/80 backdrop-blur-sm hover:bg-background shadow-md border border-border/50 hover-scale"
+                          >
+                            {copied ? <Sparkles className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
+                          </Button>
+                        </div>
+                      )}
                       
                       {/* Loading overlay */}
                       {loading && (
@@ -858,6 +922,9 @@ export default function Home() {
                               {error?.includes("Loading image") 
                                 ? "Converting image for editing..." 
                                 : "Processing your request..."}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              {formatTime(loadingTime)}
                             </p>
                           </div>
                         </div>
@@ -870,29 +937,6 @@ export default function Home() {
                         <p className="text-sm text-foreground">{description}</p>
                       </div>
                     )}
-                    
-                    {/* Action buttons */}
-                    <div className="flex justify-between mx-4 my-4">
-                      <Button 
-                        onClick={handleReset} 
-                        variant="outline"
-                        size="sm"
-                        className="hover-scale border-border/60"
-                      >
-                        <RotateCcw className="h-4 w-4 mr-2" />
-                        Reset
-                      </Button>
-                      
-                      <Button
-                        onClick={handleNewConversationWithCurrentImage}
-                        variant="default"
-                        size="sm"
-                        className="hover-scale"
-                      >
-                        <SaveAll className="h-4 w-4 mr-2" />
-                        New with this image
-                      </Button>
-                    </div>
                   </div>
                 </div>
               </div>
@@ -945,4 +989,18 @@ const handleDownloadImage = (imageUrl: string, fileName: string = "imagecraft-ed
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
+};
+
+// Format time in HH:MM:SS.ms format
+const formatTime = (seconds: number): string => {
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const secs = Math.floor(seconds % 60);
+  const ms = Math.floor((seconds % 1) * 1000);
+  
+  return [
+    hours > 0 ? String(hours).padStart(2, '0') : null,
+    String(minutes).padStart(2, '0'),
+    String(secs).padStart(2, '0') + '.' + String(ms).padStart(3, '0')
+  ].filter(Boolean).join(':');
 };

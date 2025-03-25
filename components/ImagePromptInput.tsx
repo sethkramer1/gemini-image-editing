@@ -4,9 +4,11 @@ import { useState, FormEvent, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { ArrowUp, Sparkles, Wand2, Image, MessageSquare, SendHorizonal, Type, Camera } from "lucide-react";
 import { Textarea } from "./ui/textarea";
+import { ModelSelector, GenerationModel } from "./ModelSelector";
+import { AspectRatioSelector, AspectRatio } from "./AspectRatioSelector";
 
 interface ImagePromptInputProps {
-  onSubmit: (prompt: string) => void;
+  onSubmit: (prompt: string, model?: GenerationModel, aspectRatio?: AspectRatio) => void;
   isEditing: boolean;
   isLoading: boolean;
 }
@@ -17,6 +19,8 @@ export function ImagePromptInput({
   isLoading,
 }: ImagePromptInputProps) {
   const [prompt, setPrompt] = useState("");
+  const [selectedModel, setSelectedModel] = useState<GenerationModel>("imagen-3");
+  const [selectedAspectRatio, setSelectedAspectRatio] = useState<AspectRatio>("1:1");
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   
   // Auto-focus the textarea when component mounts
@@ -29,7 +33,13 @@ export function ImagePromptInput({
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
     if (prompt.trim()) {
-      onSubmit(prompt.trim());
+      if (isEditing) {
+        onSubmit(prompt.trim());
+      } else if (selectedModel === "imagen-3") {
+        onSubmit(prompt.trim(), selectedModel, selectedAspectRatio);
+      } else {
+        onSubmit(prompt.trim(), selectedModel);
+      }
       setPrompt("");
     }
   };
@@ -43,7 +53,13 @@ export function ImagePromptInput({
         // Enter: submit form if there's content
         e.preventDefault();
         if (prompt.trim() && !isLoading) {
-          onSubmit(prompt.trim());
+          if (isEditing) {
+            onSubmit(prompt.trim());
+          } else if (selectedModel === "imagen-3") {
+            onSubmit(prompt.trim(), selectedModel, selectedAspectRatio);
+          } else {
+            onSubmit(prompt.trim(), selectedModel);
+          }
           setPrompt("");
         }
       }
@@ -93,7 +109,30 @@ export function ImagePromptInput({
         </div>
         
         <div className="flex items-center justify-between bg-background/95 border-t border-border py-2 px-3">
-          <div className="flex gap-2">
+          <div className="flex gap-2 items-center">
+            {!isEditing && (
+              <>
+                <div className="mr-2 flex items-center gap-1">
+                  <span className="text-xs text-muted-foreground">Model:</span>
+                  <ModelSelector 
+                    selectedModel={selectedModel}
+                    onModelChange={setSelectedModel}
+                    disabled={isLoading}
+                  />
+                </div>
+                
+                {selectedModel === "imagen-3" && (
+                  <div className="mr-2 flex items-center gap-1">
+                    <span className="text-xs text-muted-foreground">Size:</span>
+                    <AspectRatioSelector
+                      selectedRatio={selectedAspectRatio}
+                      onRatioChange={setSelectedAspectRatio}
+                      disabled={isLoading}
+                    />
+                  </div>
+                )}
+              </>
+            )}
             <Button
               type="button"
               variant="ghost"

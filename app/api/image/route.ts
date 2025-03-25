@@ -9,6 +9,8 @@ const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 // Define the model ID for Gemini 2.0 Flash experimental 
 // Use image generation specific model for editing
 const MODEL_ID = "gemini-2.0-flash-exp-image-generation";
+// Imagen 3 model ID
+const IMAGEN_MODEL_ID = "imagen-3.0-generate-002";
 
 // Define interface for the formatted history item
 interface FormattedHistoryItem {
@@ -23,7 +25,7 @@ export async function POST(req: NextRequest) {
   try {
     // Parse JSON request instead of FormData
     const requestData = await req.json();
-    const { prompt, image: inputImage, history } = requestData;
+    const { prompt, image: inputImage, history, model = "imagen-3", aspectRatio = "1:1" } = requestData;
 
     if (!prompt) {
       return NextResponse.json(
@@ -40,8 +42,113 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Check if using Imagen 3 for initial generation
+    if (model === "imagen-3" && !inputImage) {
+      console.log("Using Imagen 3 API for initial image generation");
+      console.log("Aspect ratio:", aspectRatio);
+      
+      // Validate aspect ratio
+      const validAspectRatios = ["1:1", "3:4", "4:3", "9:16", "16:9"];
+      console.log("Input aspect ratio:", aspectRatio);
+      console.log("Valid aspect ratios:", validAspectRatios);
+      const validatedAspectRatio = validAspectRatios.includes(aspectRatio) ? aspectRatio : "1:1";
+      console.log("Validated aspect ratio:", validatedAspectRatio);
+      
+      if (validatedAspectRatio !== aspectRatio) {
+        console.warn(`Invalid aspect ratio: ${aspectRatio}, defaulting to 1:1`);
+      }
+      
+      try {
+        // Create the request payload
+        const requestPayload = {
+          instances: [
+            {
+              prompt: prompt
+            }
+          ],
+          parameters: {
+            number_of_images: 1,
+            aspectRatio: validatedAspectRatio
+          }
+        };
+        
+        // Log the full request for debugging
+        console.log("Imagen API request payload (EXACT):", JSON.stringify(requestPayload, null, 2));
+        console.log("Imagen API URL:", `https://generativelanguage.googleapis.com/v1beta/models/${IMAGEN_MODEL_ID}:predict`);
+        console.log("Imagen API Headers:", {
+          "Content-Type": "application/json"
+        });
+        
+        // Make a direct fetch request to the Imagen 3 API
+        console.log(`Calling Imagen API with aspectRatio=${validatedAspectRatio}`);
+        const response = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${IMAGEN_MODEL_ID}:predict?key=${GEMINI_API_KEY}`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(requestPayload),
+          }
+        );
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error("Imagen API Error Response (raw):", errorText);
+          
+          let errorData;
+          try {
+            errorData = JSON.parse(errorText);
+          } catch (e) {
+            errorData = { error: "Failed to parse error response" };
+          }
+          
+          console.error("Imagen API Error:", errorData);
+          throw new Error(
+            errorData.error?.message || `Imagen API error: ${response.status}`
+          );
+        }
+
+        const data = await response.json();
+        console.log("Imagen API response structure:", JSON.stringify({
+          hasResponse: !!data,
+          hasPredictions: !!data.predictions,
+          numPredictions: data.predictions?.length || 0,
+          metadata: data.metadata || 'No metadata',
+          fullResponseKeys: Object.keys(data)
+        }, null, 2));
+
+        if (!data.predictions || data.predictions.length === 0) {
+          throw new Error("No image generated in Imagen API response");
+        }
+
+        // Extract the image data
+        const imageData = data.predictions[0].bytesBase64Encoded;
+        
+        if (!imageData) {
+          throw new Error("No image data in Imagen API response");
+        }
+
+        // Return the base64 image as JSON
+        return NextResponse.json({
+          image: `data:image/png;base64,${imageData}`,
+          description: `Image generated with Google's Imagen 3 model using prompt: "${prompt}" (${validatedAspectRatio})`,
+        });
+      } catch (error) {
+        console.error("Error in Imagen API:", error);
+        return NextResponse.json(
+          { 
+            error: "Failed to generate image with Imagen", 
+            details: error instanceof Error ? error.message : String(error) 
+          }, 
+          { status: 500 }
+        );
+      }
+    }
+
+    // For Gemini model or image editing
     // Get the model with the correct configuration for image generation
-    const model = genAI.getGenerativeModel({
+    const geminiModel = genAI.getGenerativeModel({
       model: MODEL_ID,
       generationConfig: {
         temperature: 1,
@@ -137,7 +244,7 @@ export async function POST(req: NextRequest) {
       
       // Use direct generateContent instead of chat
       result = await Promise.race([
-        model.generateContent(contentParts),
+        geminiModel.generateContent(contentParts),
         timeoutPromise
       ]) as any;
 
