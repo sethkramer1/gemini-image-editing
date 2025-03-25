@@ -51,7 +51,23 @@ export async function POST(req: NextRequest) {
     // Parse JSON request instead of FormData
     const requestData = await req.json();
     model = requestData.model || "imagen-3"; // Store the model value for error handling
-    const { prompt, image: inputImage, history, aspectRatio = "1:1" } = requestData;
+    const { prompt, image: inputImage, history, aspectRatio = "1:1", isEditing = false } = requestData;
+
+    // Log the request details
+    console.log("Request details:", {
+      hasPrompt: !!prompt,
+      hasImage: !!inputImage,
+      imageLength: inputImage ? (typeof inputImage === 'string' ? inputImage.length : 'not a string') : 0,
+      model,
+      isEditingMode: isEditing,
+      aspectRatio
+    });
+
+    // Force model to "gemini" for image editing
+    if (isEditing && inputImage) {
+      console.log("Image editing detected, forcing model to Gemini");
+      model = "gemini";
+    }
 
     if (!prompt) {
       return NextResponse.json(
@@ -69,7 +85,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Check if using Imagen 3 for initial generation and we don't need to fallback yet
-    if (model === "imagen-3" && !inputImage && !useGeminiFallback) {
+    if (model === "imagen-3" && !inputImage && !useGeminiFallback && !isEditing) {
       console.log("Using Imagen 3 API for initial image generation");
       console.log("Aspect ratio:", aspectRatio);
       
@@ -289,16 +305,23 @@ export async function POST(req: NextRequest) {
 
     // For Gemini model or image editing
     // Get the model with the correct configuration for image generation
-    const geminiModel = genAI.getGenerativeModel({
+    console.log("Using Gemini model:", MODEL_ID);
+    console.log("Image editing mode:", !!inputImage);
+
+    // Configure the model with appropriate parameters
+    const geminiConfig: any = {
       model: MODEL_ID,
       generationConfig: {
-        temperature: 1,
+        temperature: inputImage ? 0.7 : 1, // Lower temperature for more predictable edits
         topP: 0.95,
         topK: 40,
-        // @ts-expect-error - Gemini API JS is missing this type
-        responseModalities: ["Text", "Image"],
+        responseModalities: ["Text", "Image"], // Using any type avoids needing @ts-expect-error
       },
-    });
+    };
+
+    console.log("Using Gemini configuration:", JSON.stringify(geminiConfig, null, 2));
+
+    const geminiModel = genAI.getGenerativeModel(geminiConfig);
 
     let result;
 
@@ -315,55 +338,72 @@ export async function POST(req: NextRequest) {
       if (inputImage) {
         // For image editing
         console.log("Processing image edit request with prompt:", prompt);
-
-        // Check if the image is a valid data URL - more robust check
-        if (!inputImage || typeof inputImage !== 'string') {
-          console.error("Invalid image input:", inputImage ? typeof inputImage : 'null');
-          return NextResponse.json(
-            { error: "Invalid image input" },
-            { status: 400 }
-          );
-        }
-
-        // More permissive check for data URLs
-        if (!inputImage.includes('data:') || !inputImage.includes(';base64,')) {
-          console.error("Invalid image data URL format - not a base64 data URL");
-          return NextResponse.json(
-            { error: "Invalid image data URL format" },
-            { status: 400 }
-          );
-        }
-
-        // Extract the base64 part after the comma
-        const base64Index = inputImage.indexOf(';base64,');
-        if (base64Index === -1) {
-          console.error("Invalid image data URL format - missing base64 marker");
-          return NextResponse.json(
-            { error: "Invalid image data URL format" },
-            { status: 400 }
-          );
-        }
-
-        const base64Image = inputImage.substring(base64Index + 8);
+        console.log("Image editing requires Gemini model, current model:", model);
         
-        // Determine MIME type from the data URL
-        const mimeMatch = inputImage.match(/data:([^;]+);base64,/);
-        const mimeType = mimeMatch ? mimeMatch[1] : "image/jpeg";
-        
-        console.log(
-          "Image data prepared for editing: length:",
-          base64Image.length,
-          "MIME type:",
-          mimeType
-        );
+        if (model !== "gemini") {
+          console.warn("Incorrect model for image editing. Forcing to Gemini.");
+          model = "gemini";
+        }
 
-        // Add the image to content parts
-        contentParts.push({
-          inlineData: {
-            data: base64Image,
-            mimeType: mimeType,
-          },
-        });
+        try {
+          // Check if the image is a valid data URL - more robust check
+          if (!inputImage || typeof inputImage !== 'string') {
+            console.error("Invalid image input:", inputImage ? typeof inputImage : 'null');
+            return NextResponse.json(
+              { error: "Invalid image input" },
+              { status: 400 }
+            );
+          }
+
+          // More permissive check for data URLs
+          if (!inputImage.includes('data:') || !inputImage.includes(';base64,')) {
+            console.error("Invalid image data URL format - not a base64 data URL");
+            return NextResponse.json(
+              { error: "Invalid image data URL format" },
+              { status: 400 }
+            );
+          }
+
+          // Extract the base64 part after the comma
+          const base64Index = inputImage.indexOf(';base64,');
+          if (base64Index === -1) {
+            console.error("Invalid image data URL format - missing base64 marker");
+            return NextResponse.json(
+              { error: "Invalid image data URL format" },
+              { status: 400 }
+            );
+          }
+
+          const base64Image = inputImage.substring(base64Index + 8);
+          
+          // Determine MIME type from the data URL
+          const mimeMatch = inputImage.match(/data:([^;]+);base64,/);
+          const mimeType = mimeMatch ? mimeMatch[1] : "image/jpeg";
+          
+          console.log(
+            "Image data prepared for editing: length:",
+            base64Image.length,
+            "MIME type:",
+            mimeType
+          );
+
+          // Add the image to content parts
+          contentParts.push({
+            inlineData: {
+              data: base64Image,
+              mimeType: mimeType,
+            },
+          });
+        } catch (imgError) {
+          console.error("Error processing input image for editing:", imgError);
+          return NextResponse.json(
+            { 
+              error: "Failed to process input image", 
+              details: imgError instanceof Error ? imgError.message : String(imgError) 
+            },
+            { status: 400 }
+          );
+        }
       } else {
         console.log("No image provided, text-only prompt for generation:", prompt);
       }

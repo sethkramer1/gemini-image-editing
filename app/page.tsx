@@ -24,6 +24,7 @@ export default function Home() {
   const [image, setImage] = useState<string | null>(null);
   const [generatedImage, setGeneratedImage] = useState<string | null>(null);
   const [description, setDescription] = useState<string | null>(null);
+  const [imageLoaded, setImageLoaded] = useState(false);
   
   // Mode selection state
   const [mode, setMode] = useState("create");
@@ -172,6 +173,10 @@ export default function Home() {
       // Determine if we're editing based on image or mode
       const isEditingForApi = !!validatedImage || mode === "edit";
       
+      // Force model to 'gemini' for editing
+      const effectiveModel = isEditingForApi ? "gemini" : (model || "imagen-3");
+      console.log("Effective model being used:", effectiveModel, isEditingForApi ? "(forced for image editing)" : "");
+      
       // Create user message to add to history
       const userMessage: HistoryItem = {
         role: "user",
@@ -196,7 +201,7 @@ export default function Home() {
         image: validatedImage,
         history: updatedHistory, // Use the updated history with user message
         isEditing: isEditingForApi,
-        model: model || "imagen-3", // Pass the model parameter with imagen-3 as default
+        model: effectiveModel, // Use the effective model based on editing mode
         aspectRatio // Pass the aspect ratio parameter
       };
 
@@ -212,7 +217,6 @@ export default function Home() {
       clearTimeout(timeoutId);
       clearInterval(interval);
       setLoadingInterval(null);
-      setLoading(false); // Stop loading immediately when we get a response
 
       if (!response.ok) {
         const errorData = await response.json().catch(async (parseError) => {
@@ -250,11 +254,7 @@ export default function Home() {
       });
 
       if (data.image) {
-        // Update the generated image and description
-        setGeneratedImage(data.image);
-        setDescription(data.description || null);
-
-        // Add AI response
+        // First add the AI response to history
         const aiResponse: HistoryItem = {
           role: "model",
           parts: [
@@ -267,7 +267,23 @@ export default function Home() {
         const historyWithAiResponse = [...updatedHistory, aiResponse];
         setHistory(historyWithAiResponse);
         
-        // Save to Supabase
+        // Set the description
+        setDescription(data.description || null);
+        
+        // Set the generated image right away so it displays immediately on both sides
+        setGeneratedImage(data.image);
+        
+        // Set imageLoaded to true after setting the generated image
+        setImageLoaded(true);
+        
+        // Set loading to false immediately after updating the UI
+        setLoading(false);
+        if (loadingInterval) {
+          clearInterval(loadingInterval);
+          setLoadingInterval(null);
+        }
+
+        // Save to Supabase (do this in the background)
         try {
           if (currentConversationId) {
             // We're updating an existing conversation
@@ -302,12 +318,15 @@ export default function Home() {
     } catch (error) {
       setError(error instanceof Error ? error.message : "An error occurred");
       console.error("Error processing request:", error);
-    } finally {
+      
+      // Set loading to false only in error case
       setLoading(false);
       if (loadingInterval) {
         clearInterval(loadingInterval);
         setLoadingInterval(null);
       }
+    } finally {
+      // Nothing to do here as we handle both success and error cases individually
     }
   };
 
@@ -639,6 +658,18 @@ export default function Home() {
     }
   };
 
+  // Reset image loaded state when the image changes
+  useEffect(() => {
+    if (displayImage) {
+      // Don't reset imageLoaded to false, as we already set it to true in handlePromptSubmit
+      // This was causing the loading indicator to briefly flash after setting generatedImage
+      // setImageLoaded(false);
+      
+      // Let the img element's onLoad still set it to true as a fallback
+      // This way we ensure the image is always shown properly
+    }
+  }, [displayImage]);
+
   // Render loading state if authentication is still loading
   if (authLoading || !user) {
     return (
@@ -707,7 +738,7 @@ export default function Home() {
                     </div>
                   )}
 
-                  <div className="flex flex-col items-center justify-center">
+                  <div className="flex flex-col items-center justify-center relative">
                     <Card className="w-full max-w-4xl shadow-lg">
                       <CardHeader className="pb-2">
                         <CardTitle>
@@ -758,6 +789,23 @@ export default function Home() {
                         />
                       </CardContent>
                     </Card>
+
+                    {/* Loading overlay */}
+                    {loading && (
+                      <div className="absolute inset-0 bg-background/70 backdrop-blur-md flex flex-col items-center justify-center z-50">
+                        <div className="bg-card p-6 rounded-xl shadow-lg border border-border flex flex-col items-center space-y-4">
+                          <Loader2 className="h-10 w-10 text-primary animate-spin" />
+                          <p className="text-foreground font-medium text-center">
+                            {error?.includes("Loading image") 
+                              ? "Converting image for editing..." 
+                              : "Processing your request..."}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {formatTime(loadingTime)}
+                          </p>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -890,6 +938,7 @@ export default function Home() {
                           src={displayImage} 
                           alt={description || "Generated image"} 
                           className="max-w-full max-h-full object-contain image-preview"
+                          onLoad={() => setImageLoaded(true)}
                         />
                       ) : (
                         <div className="text-gray-500 flex flex-col items-center justify-center">
@@ -924,10 +973,10 @@ export default function Home() {
                       
                       {/* Loading overlay */}
                       {loading && (
-                        <div className="absolute inset-0 bg-background/50 backdrop-blur-sm flex flex-col items-center justify-center">
-                          <div className="bg-card p-4 rounded-xl shadow-lg border border-border flex flex-col items-center space-y-3">
-                            <Loader2 className="h-8 w-8 text-primary animate-spin" />
-                            <p className="text-foreground font-medium">
+                        <div className="absolute inset-0 bg-background/70 backdrop-blur-md flex flex-col items-center justify-center z-50">
+                          <div className="bg-card p-6 rounded-xl shadow-lg border border-border flex flex-col items-center space-y-4">
+                            <Loader2 className="h-10 w-10 text-primary animate-spin" />
+                            <p className="text-foreground font-medium text-center">
                               {error?.includes("Loading image") 
                                 ? "Converting image for editing..." 
                                 : "Processing your request..."}
