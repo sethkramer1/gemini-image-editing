@@ -3,7 +3,19 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import { HistoryItem, HistoryPart } from "@/lib/types";
 
 // Initialize the Google Gen AI client with your API key
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
+// Try both environment variable names (the original and an alternative)
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.NEXT_GEMINI_API_KEY || "";
+// Debug log for environment variables
+console.log("Environment variable check on initialization:", {
+  hasGeminiKey: !!GEMINI_API_KEY,
+  keyLength: GEMINI_API_KEY ? GEMINI_API_KEY.length : 0,
+  keyFirstChars: GEMINI_API_KEY ? GEMINI_API_KEY.substring(0, 5) + '...' : 'none',
+  allEnvKeys: Object.keys(process.env).filter(key => key.includes('GEMINI') || key.includes('API')),
+  envVarSources: {
+    GEMINI_API_KEY: !!process.env.GEMINI_API_KEY,
+    NEXT_GEMINI_API_KEY: !!process.env.NEXT_GEMINI_API_KEY
+  }
+});
 const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 
 // Define the model ID for Gemini 2.0 Flash experimental 
@@ -23,6 +35,14 @@ interface FormattedHistoryItem {
 
 export async function POST(req: NextRequest) {
   let model = "imagen-3"; // Default model
+  
+  // Additional debug logging for environment variables
+  console.log("Environment check in POST handler:", {
+    hasGeminiKey: !!GEMINI_API_KEY,
+    keyLength: GEMINI_API_KEY ? GEMINI_API_KEY.length : 0,
+    allEnvKeys: Object.keys(process.env).filter(key => key.includes('GEMINI') || key.includes('API')),
+    nodeEnv: process.env.NODE_ENV
+  });
   
   try {
     // Parse JSON request instead of FormData
