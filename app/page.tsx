@@ -250,11 +250,17 @@ export default function Home() {
       const requestData = {
         prompt,
         image: validatedImage,
-        history: updatedHistory, // Use the updated history with user message
+        history: isEditingForApi ? [] : updatedHistory, // Only send history if not in editing mode
         isEditing: isEditingForApi,
         model: effectiveModel, // Use the effective model based on editing mode
         aspectRatio // Pass the aspect ratio parameter
       };
+
+      console.log("Sending request to API:", {
+        isEditing: isEditingForApi,
+        historyLength: isEditingForApi ? "none (editing mode)" : updatedHistory.length,
+        hasImage: !!validatedImage
+      });
 
       const response = await fetch("/api/image", {
         method: "POST",

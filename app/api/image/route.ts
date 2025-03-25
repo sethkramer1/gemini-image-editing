@@ -117,10 +117,16 @@ export async function POST(req: NextRequest) {
       hasPrompt: !!prompt,
       hasImage: !!inputImage,
       imageLength: inputImage ? (typeof inputImage === 'string' ? inputImage.length : 'not a string') : 0,
+      historyLength: history?.length || 0,
       model,
       isEditingMode: isEditing,
       aspectRatio
     });
+
+    // If in editing mode, log that we're only using the last image
+    if (isEditing && inputImage) {
+      console.log("Image editing mode detected - using only the current image and prompt, ignoring conversation history");
+    }
 
     // Force model to "gemini" for image editing
     if (isEditing && inputImage) {
