@@ -19,19 +19,20 @@ import {
 import { useAuth } from "@/lib/auth-context";
 import { useRouter } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
+import { flushSync } from 'react-dom';
 
 export default function Home() {
   // Image state
   const [image, setImage] = useState<string | null>(null);
   const [generatedImage, setGeneratedImage] = useState<string | null>(null);
   const [description, setDescription] = useState<string | null>(null);
-  const [imageLoaded, setImageLoaded] = useState(false);
   
   // Mode selection state
   const [mode, setMode] = useState("create");
   
   // Loading state
   const [loading, setLoading] = useState(false);
+  const [loadingKey, setLoadingKey] = useState<number>(0);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loadingTime, setLoadingTime] = useState(0);
@@ -62,10 +63,13 @@ export default function Home() {
   const [copied, setCopied] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   
-  // Function to scroll to bottom smoothly
+  // Function to scroll to bottom immediately
   const scrollToBottom = () => {
     if (messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' });
+      messagesEndRef.current.scrollIntoView({ behavior: 'auto', block: 'end' });
+    }
+    if (scrollContainerRef.current) {
+      scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
     }
   };
   
@@ -136,17 +140,36 @@ export default function Home() {
       // Reset any previous errors
       setError(null);
       
-      // Set loading state
-      setLoading(true);
+      // Set loading state with flushSync to ensure immediate UI update
+      const submissionId = Date.now(); // Create a unique ID for this submission
+      console.log(`Starting edit submission ${submissionId}, setting loading=true`);
+      
+      // Force a synchronous update of loading state
+      await new Promise<void>((resolve) => {
+        flushSync(() => {
+          setLoading(true);
+          setLoadingTime(0);
+          setLoadingKey(Date.now()); // Set a new unique key for this loading session
+          resolve();
+        });
+      });
       
       // Start tracking loading time with millisecond precision
-      setLoadingTime(0);
       const startTime = Date.now();
       const interval = setInterval(() => {
-        const elapsedSeconds = (Date.now() - startTime) / 1000;
-        setLoadingTime(elapsedSeconds);
+        setLoadingTime((Date.now() - startTime) / 1000);
       }, 100); // Update 10 times per second
-      setLoadingInterval(interval);
+      
+      // Ensure interval is set in state before proceeding
+      await new Promise<void>((resolve) => {
+        flushSync(() => {
+          setLoadingInterval(interval);
+          resolve();
+        });
+      });
+      
+      // Use a small delay to ensure the loading state is applied before heavy processing begins
+      await new Promise(resolve => setTimeout(resolve, 50));
       
       // Set a timeout in case the API takes too long
       const timeoutId = setTimeout(() => {
@@ -210,10 +233,17 @@ export default function Home() {
       
       // Update history immediately with the user message
       const updatedHistory = [...history, userMessage];
-      setHistory(updatedHistory);
+      flushSync(() => {
+        setHistory(updatedHistory);
+      });
       
-      // Ensure we scroll to the bottom to show the new message
-      setTimeout(scrollToBottom, 50);
+      // Scroll to bottom immediately to show user's message
+      if (scrollContainerRef.current) {
+        scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
+      }
+      if (messagesEndRef.current) {
+        messagesEndRef.current.scrollIntoView({ behavior: 'auto', block: 'end' });
+      }
       
       // Prepare the request data as JSON
       const requestData = {
@@ -287,19 +317,11 @@ export default function Home() {
         const historyWithAiResponse = [...updatedHistory, aiResponse];
         setHistory(historyWithAiResponse);
         
-        // Scroll to bottom to show the AI response
-        setTimeout(scrollToBottom, 50);
-        
-        // Set the description
+        // Set the description and generated image
         setDescription(data.description || null);
-        
-        // Set the generated image right away so it displays immediately on both sides
         setGeneratedImage(data.image);
         
-        // Set imageLoaded to true after setting the generated image
-        setImageLoaded(true);
-        
-        // Set loading to false immediately after updating the UI
+        // Set loading to false after everything is updated
         setLoading(false);
         if (loadingInterval) {
           clearInterval(loadingInterval);
@@ -309,7 +331,6 @@ export default function Home() {
         // Save to Supabase (do this in the background)
         try {
           if (currentConversationId) {
-            // We're updating an existing conversation
             await convertAndSaveConversation(historyWithAiResponse, currentConversationId);
           } else {
             // This is a new conversation
@@ -343,11 +364,14 @@ export default function Home() {
       console.error("Error processing request:", error);
       
       // Set loading to false only in error case
-      setLoading(false);
-      if (loadingInterval) {
-        clearInterval(loadingInterval);
-        setLoadingInterval(null);
-      }
+      flushSync(() => {
+        console.log(`Error in edit submission, setting loading=false`);
+        setLoading(false);
+        if (loadingInterval) {
+          clearInterval(loadingInterval);
+          setLoadingInterval(null);
+        }
+      });
     } finally {
       // Nothing to do here as we handle both success and error cases individually
     }
@@ -358,6 +382,10 @@ export default function Home() {
     setGeneratedImage(null);
     setDescription(null);
     setLoading(false);
+    if (loadingInterval) {
+      clearInterval(loadingInterval);
+      setLoadingInterval(null);
+    }
     setError(null);
     setHistory([]);
     setCurrentConversationIndex(-1);
@@ -418,10 +446,17 @@ export default function Home() {
       // Parse the conversation
       if (conversationHistory.length > 0) {
         // Reset the UI
-        setImage(null);
-        setGeneratedImage(null);
-        setDescription(null);
-        setError(null);
+        flushSync(() => {
+          setImage(null);
+          setGeneratedImage(null);
+          setDescription(null);
+          setError(null);
+          setLoading(false);
+          if (loadingInterval) {
+            clearInterval(loadingInterval);
+            setLoadingInterval(null);
+          }
+        });
         
         // Find the last image in the conversation (from either user or model)
         let lastImage: string | null = null;
@@ -479,7 +514,11 @@ export default function Home() {
     setImage(null);
     setGeneratedImage(null);
     setDescription(null);
-    setImageLoaded(false);
+    setLoading(false);
+    if (loadingInterval) {
+      clearInterval(loadingInterval);
+      setLoadingInterval(null);
+    }
     setError(null);
   };
   
@@ -522,6 +561,11 @@ export default function Home() {
         setHistory([]);
         setGeneratedImage(null);
         setImage(null);
+        setLoading(false);
+        if (loadingInterval) {
+          clearInterval(loadingInterval);
+          setLoadingInterval(null);
+        }
       } else if (currentConversationIndex > index) {
         // We're deleting a conversation before the current one
         setCurrentConversationIndex(currentConversationIndex - 1);
@@ -623,8 +667,7 @@ export default function Home() {
   const convertUrlToBase64 = async (url: string): Promise<string | null> => {
     try {
       console.log("Converting URL to base64:", url);
-      setLoading(true);
-      setError("Loading image data for editing... Please wait.");
+      // Remove loading state management from here since it's handled by handlePromptSubmit
       
       // Fetch the image
       const response = await fetch(url);
@@ -634,15 +677,12 @@ export default function Home() {
       return new Promise((resolve) => {
         const reader = new FileReader();
         reader.onloadend = () => {
-          setLoading(false);
-          setError(null); // Clear the loading message
           resolve(reader.result as string);
         };
         reader.readAsDataURL(blob);
       });
     } catch (error) {
       console.error("Error converting URL to base64:", error);
-      setLoading(false);
       setError("Failed to load the image. Please try downloading it manually.");
       return null;
     }
@@ -709,24 +749,10 @@ export default function Home() {
     }
   };
 
-  // Reset image loaded state when the image changes
+  // Add effect to log loading state changes
   useEffect(() => {
-    if (displayImage) {
-      // Don't reset imageLoaded to false, as we already set it to true in handlePromptSubmit
-      // This was causing the loading indicator to briefly flash after setting generatedImage
-      // setImageLoaded(false);
-      
-      // Let the img element's onLoad still set it to true as a fallback
-      // This way we ensure the image is always shown properly
-    }
-  }, [displayImage]);
-
-  // Scroll to bottom when image is fully loaded
-  useEffect(() => {
-    if (imageLoaded && scrollContainerRef.current) {
-      scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
-    }
-  }, [imageLoaded]);
+    console.log('Loading state changed:', loading);
+  }, [loading]);
 
   // Render loading state if authentication is still loading
   if (authLoading || !user) {
@@ -772,7 +798,9 @@ export default function Home() {
                   className="absolute inset-0 overflow-y-auto px-4 scroll-smooth"
                   style={{
                     scrollbarWidth: 'thin',
-                    scrollbarColor: 'var(--border) transparent'
+                    scrollbarColor: 'var(--border) transparent',
+                    paddingBottom: '130px',
+                    scrollBehavior: 'auto'
                   }}
                 >
                   <div className="min-h-full flex flex-col justify-center py-8">
@@ -830,13 +858,14 @@ export default function Home() {
                             onSubmit={handlePromptSubmit}
                             isEditing={isEditing || mode === "edit"}
                             isLoading={loading}
+                            key={`prompt-input-${loadingKey}`} 
                           />
                         </CardContent>
                       </Card>
-
+                      
                       {/* Loading overlay */}
                       {loading && (
-                        <div className="absolute inset-0 bg-background/70 backdrop-blur-md flex flex-col items-center justify-center z-50">
+                        <div key={`loading-overlay-${loadingKey}`} className="absolute inset-0 bg-background/70 backdrop-blur-md flex flex-col items-center justify-center z-50">
                           <div className="bg-card p-6 rounded-xl shadow-lg border border-border flex flex-col items-center space-y-4">
                             <Loader2 className="h-10 w-10 text-primary animate-spin" />
                             <p className="text-foreground font-medium text-center">
@@ -867,7 +896,8 @@ export default function Home() {
                       style={{
                         scrollbarWidth: 'thin',
                         scrollbarColor: 'var(--border) transparent',
-                        paddingBottom: '130px'
+                        paddingBottom: '130px',
+                        scrollBehavior: 'auto'
                       }}
                     >
                       <div className="min-h-full flex flex-col py-4">
@@ -932,6 +962,15 @@ export default function Home() {
                                             alt={`${isUser ? 'User' : 'AI'} image`}
                                             className="w-full h-auto max-h-[180px] object-contain"
                                             loading="lazy"
+                                            onLoad={() => {
+                                              // Scroll to bottom immediately after image loads
+                                              if (scrollContainerRef.current) {
+                                                scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
+                                              }
+                                              if (messagesEndRef.current) {
+                                                messagesEndRef.current.scrollIntoView({ behavior: 'auto', block: 'end' });
+                                              }
+                                            }}
                                           />
                                         </div>
                                       )}
@@ -966,6 +1005,7 @@ export default function Home() {
                         onSubmit={handlePromptSubmit}
                         isEditing={isEditing || mode === "edit"}
                         isLoading={loading}
+                        key={`prompt-input-${loadingKey}`} 
                       />
                     </div>
                   </div>
@@ -983,9 +1023,13 @@ export default function Home() {
                             alt={description || "Generated image"} 
                             className="max-w-full max-h-full object-contain image-preview"
                             onLoad={() => {
-                              setImageLoaded(true);
-                              // Scroll to bottom after image loads
-                              setTimeout(scrollToBottom, 100);
+                              // Scroll to bottom immediately after image loads
+                              if (scrollContainerRef.current) {
+                                scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
+                              }
+                              if (messagesEndRef.current) {
+                                messagesEndRef.current.scrollIntoView({ behavior: 'auto', block: 'end' });
+                              }
                             }}
                           />
                         ) : (
@@ -1021,7 +1065,7 @@ export default function Home() {
                         
                         {/* Loading overlay */}
                         {loading && (
-                          <div className="absolute inset-0 bg-background/70 backdrop-blur-md flex flex-col items-center justify-center z-50">
+                          <div key={`loading-overlay-image-${loadingKey}`} className="absolute inset-0 bg-background/70 backdrop-blur-md flex flex-col items-center justify-center z-50">
                             <div className="bg-card p-6 rounded-xl shadow-lg border border-border flex flex-col items-center space-y-4">
                               <Loader2 className="h-10 w-10 text-primary animate-spin" />
                               <p className="text-foreground font-medium text-center">
