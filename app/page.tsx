@@ -215,11 +215,20 @@ export default function Home() {
       setLoading(false); // Stop loading immediately when we get a response
 
       if (!response.ok) {
-        const errorData = await response.json();
+        const errorData = await response.json().catch(async (parseError) => {
+          console.error("Response parse error:", parseError);
+          // If JSON parsing fails, get the raw text
+          const rawText = await response.text().catch(() => "Unknown error");
+          return { error: "Server error", details: rawText };
+        });
+        
         console.error("API Error Response:", errorData);
-        throw new Error(
-          errorData.details || errorData.error || `Server error: ${response.status}`
-        );
+        
+        // Check if there's additional context about the error
+        const errorMessage = errorData.details || errorData.error || `Server error: ${response.status}`;
+        const additionalInfo = errorData.possibleCause ? `\n${errorData.possibleCause}` : '';
+        
+        throw new Error(errorMessage + additionalInfo);
       }
 
       const data = await response.json().catch((parseError) => {

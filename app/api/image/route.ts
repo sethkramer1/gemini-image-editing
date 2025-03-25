@@ -22,10 +22,13 @@ interface FormattedHistoryItem {
 }
 
 export async function POST(req: NextRequest) {
+  let model = "imagen-3"; // Default model
+  
   try {
     // Parse JSON request instead of FormData
     const requestData = await req.json();
-    const { prompt, image: inputImage, history, model = "imagen-3", aspectRatio = "1:1" } = requestData;
+    model = requestData.model || "imagen-3"; // Store the model value for error handling
+    const { prompt, image: inputImage, history, aspectRatio = "1:1" } = requestData;
 
     if (!prompt) {
       return NextResponse.json(
@@ -98,9 +101,15 @@ export async function POST(req: NextRequest) {
           
           let errorData;
           try {
+            // Try to parse as JSON
             errorData = JSON.parse(errorText);
           } catch (e) {
-            errorData = { error: "Failed to parse error response" };
+            // If not valid JSON, use the text as the error message
+            errorData = { 
+              error: { 
+                message: errorText.startsWith("An error") ? errorText : "Failed to parse error response" 
+              } 
+            };
           }
           
           console.error("Imagen API Error:", errorData);
@@ -109,7 +118,26 @@ export async function POST(req: NextRequest) {
           );
         }
 
-        const data = await response.json();
+        // Try to parse the JSON response with better error handling
+        let data;
+        try {
+          data = await response.json();
+        } catch (jsonError) {
+          console.error("Failed to parse Imagen API response as JSON:", jsonError);
+          const rawText = await response.text().catch(() => "Unknown content");
+          console.error("Raw response content:", rawText.substring(0, 200) + "..."); // Only log first 200 chars
+          
+          return NextResponse.json(
+            { 
+              error: "Invalid response from Imagen API",
+              details: "The API returned a response that couldn't be processed",
+              possibleCause: "This could be a temporary issue with the Imagen API. You might want to try again later or switch to the Gemini model which may be more reliable.",
+              rawResponsePreview: rawText.substring(0, 100) + "..."
+            }, 
+            { status: 500 }
+          );
+        }
+
         console.log("Imagen API response structure:", JSON.stringify({
           hasResponse: !!data,
           hasPredictions: !!data.predictions,
@@ -136,10 +164,23 @@ export async function POST(req: NextRequest) {
         });
       } catch (error) {
         console.error("Error in Imagen API:", error);
+        
+        // Determine if this is a JSON parsing error
+        const errorMessage = error instanceof Error 
+          ? error.message 
+          : String(error);
+          
+        // Check if this might be a parsing error from the API response
+        const isPossibleParsingError = errorMessage.includes("Unexpected token") || 
+                                     errorMessage.includes("is not valid JSON");
+        
         return NextResponse.json(
           { 
             error: "Failed to generate image with Imagen", 
-            details: error instanceof Error ? error.message : String(error) 
+            details: errorMessage,
+            possibleCause: isPossibleParsingError 
+              ? "The API returned a non-JSON response. This may be a temporary issue with the Imagen API." 
+              : undefined
           }, 
           { status: 500 }
         );
@@ -260,12 +301,23 @@ export async function POST(req: NextRequest) {
 
     } catch (error) {
       console.error("Error in generateContent:", error);
-      console.error("Full error details:", JSON.stringify(error, null, 2));
+      
+      // Check if we have a string error that might indicate a non-JSON response
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const isPossibleParsingError = errorMessage.includes("Unexpected token") || 
+                                   errorMessage.includes("is not valid JSON") ||
+                                   errorMessage.includes("Request En");
+      
+      console.error("Full error details:", errorMessage);
+      
       return NextResponse.json(
         { 
           error: "Failed to generate image", 
-          details: error instanceof Error ? error.message : String(error),
-          fullError: JSON.stringify(error, null, 2)
+          details: errorMessage,
+          possibleCause: isPossibleParsingError 
+            ? "The API returned a non-JSON response. This may be a temporary issue with the Gemini API." 
+            : undefined,
+          fullError: error instanceof Error ? error.stack : undefined
         }, 
         { status: 500 }
       );
@@ -286,34 +338,54 @@ export async function POST(req: NextRequest) {
     let mimeType = "image/png";
 
     // Process the response
-    if (response.candidates && response.candidates.length > 0) {
-      const parts = response.candidates[0].content.parts;
-      console.log("Number of parts in response:", parts.length);
+    try {
+      if (response.candidates && response.candidates.length > 0) {
+        const parts = response.candidates[0].content.parts;
+        console.log("Number of parts in response:", parts.length);
 
-      for (const part of parts) {
-        if ("inlineData" in part && part.inlineData) {
-          // Get the image data
-          imageData = part.inlineData.data;
-          mimeType = part.inlineData.mimeType || "image/png";
-          console.log(
-            "Image data received, length:",
-            imageData.length,
-            "MIME type:",
-            mimeType
-          );
-        } else if ("text" in part && part.text) {
-          // Store the text
-          textResponse = part.text;
-          console.log(
-            "Text response received:",
-            textResponse.substring(0, 50) + "..."
-          );
+        for (const part of parts) {
+          if ("inlineData" in part && part.inlineData) {
+            // Get the image data
+            imageData = part.inlineData.data;
+            mimeType = part.inlineData.mimeType || "image/png";
+            console.log(
+              "Image data received, length:",
+              imageData.length,
+              "MIME type:",
+              mimeType
+            );
+          } else if ("text" in part && part.text) {
+            // Store the text
+            textResponse = part.text;
+            console.log(
+              "Text response received:",
+              textResponse.substring(0, 50) + "..."
+            );
+          }
         }
+      } else {
+        console.error("No candidates in response or empty response", response);
+        return NextResponse.json(
+          { error: "No valid response from Gemini API" },
+          { status: 500 }
+        );
       }
-    } else {
-      console.error("No candidates in response or empty response", response);
+    } catch (parseError) {
+      console.error("Error parsing Gemini API response:", parseError);
+      
+      // Format the error for the client
+      const parseErrorMessage = parseError instanceof Error ? parseError.message : String(parseError);
+      const isPossibleParsingError = parseErrorMessage.includes("Unexpected token") || 
+                                   parseErrorMessage.includes("is not valid JSON");
+      
       return NextResponse.json(
-        { error: "No valid response from Gemini API" },
+        { 
+          error: "Failed to process Gemini API response", 
+          details: parseErrorMessage,
+          possibleCause: isPossibleParsingError 
+            ? "The API returned a response that couldn't be properly processed. This may be a temporary issue." 
+            : undefined
+        }, 
         { status: 500 }
       );
     }
@@ -333,10 +405,21 @@ export async function POST(req: NextRequest) {
     });
   } catch (error) {
     console.error("Error generating image:", error);
+    
+    // Check if we have a string error that might indicate a non-JSON response
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const isPossibleParsingError = errorMessage.includes("Unexpected token") || 
+                                 errorMessage.includes("is not valid JSON") ||
+                                 errorMessage.includes("Request En");
+    
     return NextResponse.json(
       {
         error: "Failed to generate image",
-        details: error instanceof Error ? error.message : String(error),
+        details: errorMessage,
+        possibleCause: isPossibleParsingError 
+          ? "The API returned a non-JSON response. This may be a temporary issue with the API." 
+          : undefined,
+        modelType: model === "imagen-3" ? "Imagen" : "Gemini"
       },
       { status: 500 }
     );
