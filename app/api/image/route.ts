@@ -35,13 +35,16 @@ interface FormattedHistoryItem {
 
 export async function POST(req: NextRequest) {
   let model = "imagen-3"; // Default model
+  const isProduction = process.env.NODE_ENV === 'production';
+  let useGeminiFallback = false; // Flag to indicate if we should fallback to Gemini
   
   // Additional debug logging for environment variables
   console.log("Environment check in POST handler:", {
     hasGeminiKey: !!GEMINI_API_KEY,
     keyLength: GEMINI_API_KEY ? GEMINI_API_KEY.length : 0,
     allEnvKeys: Object.keys(process.env).filter(key => key.includes('GEMINI') || key.includes('API')),
-    nodeEnv: process.env.NODE_ENV
+    nodeEnv: process.env.NODE_ENV,
+    isProduction
   });
   
   try {
@@ -65,8 +68,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Check if using Imagen 3 for initial generation
-    if (model === "imagen-3" && !inputImage) {
+    // Check if using Imagen 3 for initial generation and we don't need to fallback yet
+    if (model === "imagen-3" && !inputImage && !useGeminiFallback) {
       console.log("Using Imagen 3 API for initial image generation");
       console.log("Aspect ratio:", aspectRatio);
       
@@ -102,17 +105,46 @@ export async function POST(req: NextRequest) {
           "Content-Type": "application/json"
         });
         
+        // Create a fetch function with retry capability
+        const fetchWithRetry = async (url: string, options: RequestInit, retries = 2, delay = 1000) => {
+          try {
+            return await fetch(url, options);
+          } catch (err) {
+            console.error(`Fetch attempt failed: ${err}`);
+            if (retries <= 0) throw err;
+            console.log(`Retrying in ${delay}ms... (${retries} attempts left)`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+            return fetchWithRetry(url, options, retries - 1, delay * 2);
+          }
+        };
+
+        // Enhanced options for better compatibility with Vercel
+        const fetchOptions = {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            // Add additional headers to help with Vercel infrastructure
+            "Accept": "application/json",
+            "Cache-Control": "no-cache",
+            "User-Agent": "VercelServerlessFunction"
+          },
+          body: JSON.stringify(requestPayload),
+          // Add a longer timeout for Vercel
+          signal: AbortSignal.timeout(50000), // 50 second timeout
+        };
+
+        // Log the full request for debugging
+        console.log("Enhanced fetch options:", JSON.stringify({
+          method: fetchOptions.method,
+          headers: fetchOptions.headers,
+          hasBody: !!fetchOptions.body,
+        }, null, 2));
+
         // Make a direct fetch request to the Imagen 3 API
         console.log(`Calling Imagen API with aspectRatio=${validatedAspectRatio}`);
-        const response = await fetch(
+        const response = await fetchWithRetry(
           `https://generativelanguage.googleapis.com/v1beta/models/${IMAGEN_MODEL_ID}:predict?key=${GEMINI_API_KEY}`,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify(requestPayload),
-          }
+          fetchOptions
         );
 
         if (!response.ok) {
@@ -133,55 +165,95 @@ export async function POST(req: NextRequest) {
           }
           
           console.error("Imagen API Error:", errorData);
-          throw new Error(
-            errorData.error?.message || `Imagen API error: ${response.status}`
-          );
-        }
-
-        // Try to parse the JSON response with better error handling
-        let data;
-        try {
-          data = await response.json();
-        } catch (jsonError) {
-          console.error("Failed to parse Imagen API response as JSON:", jsonError);
-          const rawText = await response.text().catch(() => "Unknown content");
-          console.error("Raw response content:", rawText.substring(0, 200) + "..."); // Only log first 200 chars
           
-          return NextResponse.json(
-            { 
-              error: "Invalid response from Imagen API",
-              details: "The API returned a response that couldn't be processed",
-              possibleCause: "This could be a temporary issue with the Imagen API. You might want to try again later or switch to the Gemini model which may be more reliable.",
-              rawResponsePreview: rawText.substring(0, 100) + "..."
-            }, 
-            { status: 500 }
-          );
+          // If in production and we get an error, try falling back to Gemini model
+          if (isProduction) {
+            console.log("Production environment detected. Falling back to Gemini model after Imagen failed");
+            // Set the fallback flag and change model
+            useGeminiFallback = true;
+            model = "gemini";
+          } else {
+            throw new Error(
+              errorData.error?.message || `Imagen API error: ${response.status}`
+            );
+          }
         }
 
-        console.log("Imagen API response structure:", JSON.stringify({
-          hasResponse: !!data,
-          hasPredictions: !!data.predictions,
-          numPredictions: data.predictions?.length || 0,
-          metadata: data.metadata || 'No metadata',
-          fullResponseKeys: Object.keys(data)
-        }, null, 2));
+        // Only continue with Imagen if we're not falling back to Gemini
+        if (!useGeminiFallback) {
+          // Try to parse the JSON response with better error handling
+          let data;
+          try {
+            data = await response.json();
+          } catch (jsonError) {
+            console.error("Failed to parse Imagen API response as JSON:", jsonError);
+            const rawText = await response.text().catch(() => "Unknown content");
+            console.error("Raw response content:", rawText.substring(0, 200) + "..."); // Only log first 200 chars
+            
+            // In production, fallback to Gemini instead of returning error
+            if (isProduction) {
+              console.log("Production environment detected. Falling back to Gemini model after Imagen JSON parse error");
+              useGeminiFallback = true;
+              model = "gemini";
+            } else {
+              return NextResponse.json(
+                { 
+                  error: "Invalid response from Imagen API",
+                  details: "The API returned a response that couldn't be processed",
+                  possibleCause: "This could be a temporary issue with the Imagen API. You might want to try again later or switch to the Gemini model which may be more reliable.",
+                  rawResponsePreview: rawText.substring(0, 100) + "..."
+                }, 
+                { status: 500 }
+              );
+            }
+          }
 
-        if (!data.predictions || data.predictions.length === 0) {
-          throw new Error("No image generated in Imagen API response");
+          // Only continue processing Imagen response if we have data and aren't using fallback
+          if (data && !useGeminiFallback) {
+            console.log("Imagen API response structure:", JSON.stringify({
+              hasResponse: !!data,
+              hasPredictions: !!data.predictions,
+              numPredictions: data.predictions?.length || 0,
+              metadata: data.metadata || 'No metadata',
+              fullResponseKeys: Object.keys(data)
+            }, null, 2));
+
+            if (!data.predictions || data.predictions.length === 0) {
+              if (isProduction) {
+                console.log("Production environment detected. No predictions in Imagen response. Falling back to Gemini model");
+                useGeminiFallback = true;
+                model = "gemini";
+              } else {
+                throw new Error("No image generated in Imagen API response");
+              }
+            }
+
+            // Only try to extract image if we're not using fallback
+            if (!useGeminiFallback) {
+              // Extract the image data
+              const imageData = data.predictions[0].bytesBase64Encoded;
+              
+              if (!imageData) {
+                if (isProduction) {
+                  console.log("Production environment detected. No image data in Imagen response. Falling back to Gemini model");
+                  useGeminiFallback = true;
+                  model = "gemini";
+                } else {
+                  throw new Error("No image data in Imagen API response");
+                }
+              }
+
+              // Only return result if we have image data and aren't using fallback
+              if (imageData && !useGeminiFallback) {
+                // Return the base64 image as JSON
+                return NextResponse.json({
+                  image: `data:image/png;base64,${imageData}`,
+                  description: `Image generated with Google's Imagen 3 model using prompt: "${prompt}" (${validatedAspectRatio})`,
+                });
+              }
+            }
+          }
         }
-
-        // Extract the image data
-        const imageData = data.predictions[0].bytesBase64Encoded;
-        
-        if (!imageData) {
-          throw new Error("No image data in Imagen API response");
-        }
-
-        // Return the base64 image as JSON
-        return NextResponse.json({
-          image: `data:image/png;base64,${imageData}`,
-          description: `Image generated with Google's Imagen 3 model using prompt: "${prompt}" (${validatedAspectRatio})`,
-        });
       } catch (error) {
         console.error("Error in Imagen API:", error);
         
@@ -194,16 +266,24 @@ export async function POST(req: NextRequest) {
         const isPossibleParsingError = errorMessage.includes("Unexpected token") || 
                                      errorMessage.includes("is not valid JSON");
         
-        return NextResponse.json(
-          { 
-            error: "Failed to generate image with Imagen", 
-            details: errorMessage,
-            possibleCause: isPossibleParsingError 
-              ? "The API returned a non-JSON response. This may be a temporary issue with the Imagen API." 
-              : undefined
-          }, 
-          { status: 500 }
-        );
+        // In production, fallback to Gemini instead of returning error
+        if (isProduction) {
+          console.log("Production environment detected. Error in Imagen API. Falling back to Gemini model:", errorMessage);
+          // Switch to Gemini model as fallback
+          useGeminiFallback = true;
+          model = "gemini";
+        } else {
+          return NextResponse.json(
+            { 
+              error: "Failed to generate image with Imagen", 
+              details: errorMessage,
+              possibleCause: isPossibleParsingError 
+                ? "The API returned a non-JSON response. This may be a temporary issue with the Imagen API." 
+                : undefined
+            }, 
+            { status: 500 }
+          );
+        }
       }
     }
 
@@ -445,3 +525,9 @@ export async function POST(req: NextRequest) {
     );
   }
 }
+
+// Export configuration for Vercel optimization
+export const config = {
+  runtime: 'nodejs', // Use Node.js runtime instead of Edge runtime
+  maxDuration: 60, // Set maximum duration to 60 seconds
+};
