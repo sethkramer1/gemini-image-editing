@@ -4,6 +4,9 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/lib/auth-context';
 import { supabase } from '@/lib/supabase';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { ImageIcon, LogIn, ArrowRight, AlertCircle } from 'lucide-react';
 
 export default function SignIn() {
   const [email, setEmail] = useState('');
@@ -56,22 +59,33 @@ export default function SignIn() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-md w-full space-y-8">
-        <div>
-          <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
-            Sign in to your account
-          </h2>
-        </div>
-        <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
-          {error && (
-            <div className="rounded-md bg-red-50 p-4">
-              <div className="text-sm text-red-700">{error}</div>
+    <div className="flex min-h-screen flex-col items-center justify-center bg-background p-4">
+      <Card className="w-full max-w-md shadow-lg">
+        <CardHeader className="space-y-1 text-center">
+          <div className="flex justify-center mb-2">
+            <div className="flex items-center">
+              <ImageIcon className="h-6 w-6 text-primary mr-2" />
+              <span className="text-xl font-semibold bg-gradient-to-r from-primary to-purple-500 bg-clip-text text-transparent">
+                ImageCraft
+              </span>
             </div>
-          )}
-          <div className="rounded-md shadow-sm -space-y-px">
-            <div>
-              <label htmlFor="email" className="sr-only">
+          </div>
+          <CardTitle className="text-2xl font-bold">Welcome back</CardTitle>
+          <p className="text-sm text-muted-foreground">
+            Sign in to your account to continue
+          </p>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            {error && (
+              <div className="flex items-center space-x-2 rounded-md bg-destructive/15 p-3 text-destructive">
+                <AlertCircle className="h-4 w-4" />
+                <div className="text-sm">{error}</div>
+              </div>
+            )}
+            
+            <div className="space-y-2">
+              <label htmlFor="email" className="text-sm font-medium leading-none text-foreground">
                 Email address
               </label>
               <input
@@ -80,14 +94,15 @@ export default function SignIn() {
                 type="email"
                 required
                 disabled={isSubmitting}
-                className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-t-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 focus:z-10 sm:text-sm disabled:bg-gray-100 disabled:cursor-not-allowed"
-                placeholder="Email address"
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:bg-muted disabled:cursor-not-allowed"
+                placeholder="you@example.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
               />
             </div>
-            <div>
-              <label htmlFor="password" className="sr-only">
+            
+            <div className="space-y-2">
+              <label htmlFor="password" className="text-sm font-medium leading-none text-foreground">
                 Password
               </label>
               <input
@@ -96,19 +111,17 @@ export default function SignIn() {
                 type="password"
                 required
                 disabled={isSubmitting}
-                className="appearance-none rounded-none relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-b-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 focus:z-10 sm:text-sm disabled:bg-gray-100 disabled:cursor-not-allowed"
-                placeholder="Password"
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:bg-muted disabled:cursor-not-allowed"
+                placeholder="Enter your password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
               />
             </div>
-          </div>
 
-          <div>
-            <button
-              type="submit"
+            <Button 
+              type="submit" 
               disabled={isSubmitting}
-              className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:bg-indigo-400 disabled:cursor-not-allowed"
+              className="w-full hover-scale"
             >
               {isSubmitting ? (
                 <>
@@ -119,18 +132,21 @@ export default function SignIn() {
                   Signing in...
                 </>
               ) : (
-                'Sign in'
+                <>
+                  Sign in <ArrowRight className="ml-2 h-4 w-4" />
+                </>
               )}
-            </button>
-          </div>
-        </form>
-
-        <div className="text-sm text-center">
-          <Link href="/auth/signup" className="font-medium text-indigo-600 hover:text-indigo-500">
-            Don&apos;t have an account? Sign up
-          </Link>
-        </div>
-      </div>
+            </Button>
+            
+            <div className="text-sm text-center text-muted-foreground">
+              Don&apos;t have an account?{' '}
+              <Link href="/auth/signup" className="font-medium text-primary hover:text-primary/90 hover:underline">
+                Sign up
+              </Link>
+            </div>
+          </form>
+        </CardContent>
+      </Card>
     </div>
   );
 } 
