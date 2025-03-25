@@ -59,6 +59,18 @@ export default function Home() {
   const [copied, setCopied] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   
+  // Function to scroll to bottom smoothly
+  const scrollToBottom = () => {
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    }
+  };
+  
+  // Add effect to scroll to end when messages change
+  useEffect(() => {
+    scrollToBottom();
+  }, [history, generatedImage]);
+  
   // Auth redirect effect
   useEffect(() => {
     if (!authLoading && !user) {
@@ -195,6 +207,9 @@ export default function Home() {
       const updatedHistory = [...history, userMessage];
       setHistory(updatedHistory);
       
+      // Ensure we scroll to the bottom to show the new message
+      setTimeout(scrollToBottom, 50);
+      
       // Prepare the request data as JSON
       const requestData = {
         prompt,
@@ -266,6 +281,9 @@ export default function Home() {
         // Update history with AI response (user message was already added)
         const historyWithAiResponse = [...updatedHistory, aiResponse];
         setHistory(historyWithAiResponse);
+        
+        // Scroll to bottom to show the AI response
+        setTimeout(scrollToBottom, 50);
         
         // Set the description
         setDescription(data.description || null);
@@ -561,6 +579,18 @@ export default function Home() {
     }
   }, [history]);
 
+  // Add additional effect to scroll when a new image is generated
+  useEffect(() => {
+    if (scrollContainerRef.current && generatedImage) {
+      // Use setTimeout to ensure DOM has updated with the new image
+      setTimeout(() => {
+        if (scrollContainerRef.current) {
+          scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
+        }
+      }, 200);
+    }
+  }, [generatedImage]);
+
   // Function to check if an image is a URL
   const isImageUrl = (imageData: string | null): boolean => {
     return !!imageData && imageData.startsWith('http');
@@ -669,6 +699,13 @@ export default function Home() {
       // This way we ensure the image is always shown properly
     }
   }, [displayImage]);
+
+  // Scroll to bottom when image is fully loaded
+  useEffect(() => {
+    if (imageLoaded && scrollContainerRef.current) {
+      scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
+    }
+  }, [imageLoaded]);
 
   // Render loading state if authentication is still loading
   if (authLoading || !user) {
@@ -938,7 +975,11 @@ export default function Home() {
                           src={displayImage} 
                           alt={description || "Generated image"} 
                           className="max-w-full max-h-full object-contain image-preview"
-                          onLoad={() => setImageLoaded(true)}
+                          onLoad={() => {
+                            setImageLoaded(true);
+                            // Scroll to bottom after image loads
+                            setTimeout(scrollToBottom, 100);
+                          }}
                         />
                       ) : (
                         <div className="text-gray-500 flex flex-col items-center justify-center">
