@@ -18,6 +18,7 @@ import {
 } from "@/lib/database";
 import { useAuth } from "@/lib/auth-context";
 import { useRouter } from "next/navigation";
+import { AppShell } from "@/components/AppShell";
 
 export default function Home() {
   // Image state
@@ -45,6 +46,8 @@ export default function Home() {
   
   // UI state
   const [sidebarExpanded, setSidebarExpanded] = useState(true);
+  const [hasMoreConversations, setHasMoreConversations] = useState(false);
+  const [loadedConversationsCount, setLoadedConversationsCount] = useState(0);
   
   // Auth state
   const { user, loading: authLoading } = useAuth();
@@ -95,12 +98,14 @@ export default function Home() {
         
         // Pre-load the first few conversations for better UX
         const preloadedConversations: HistoryItem[][] = [];
-        for (let i = 0; i < Math.min(3, conversations.length); i++) {
+        for (let i = 0; i < Math.min(10, conversations.length); i++) {
           const history = await loadConversationAsHistory(conversations[i].id, user.id);
           preloadedConversations.push(history);
         }
         
         setAllConversations(preloadedConversations);
+        setLoadedConversationsCount(Math.min(10, conversations.length));
+        setHasMoreConversations(conversations.length > 10);
       } catch (error) {
         console.error('Failed to load conversations:', error);
         setError('Failed to load your conversation history');
@@ -461,75 +466,64 @@ export default function Home() {
   const handleClearHistory = async () => {
     if (!user) return;
     
-    try {
-      // Reset UI
-      handleReset();
-      
-      // Reset conversation references
-      setCurrentConversationIndex(-1);
-      setCurrentConversationId(null);
-      
-      // Show loading state
-      setHistoryLoading(true);
-      
-      // Reload conversation list (in case any were created but not shown)
-      const conversations = await getConversations(user.id);
-      setConversationsData(conversations);
-      
-      // Pre-load the first few conversations for better UX
-      const preloadedConversations: HistoryItem[][] = [];
-      for (let i = 0; i < Math.min(3, conversations.length); i++) {
-        const history = await loadConversationAsHistory(conversations[i].id, user.id);
-        preloadedConversations.push(history);
-      }
-      
-      setAllConversations(preloadedConversations);
-    } catch (error) {
-      console.error("Error clearing history:", error);
-      setError("Failed to clear history");
-    } finally {
-      setHistoryLoading(false);
-    }
+    // Clear all history
+    setHistory([]);
+    setAllConversations([]);
+    setConversationsData([]);
+    setCurrentConversationIndex(-1);
+    setCurrentConversationId(null);
+    setLoadedConversationsCount(0);
+    setHasMoreConversations(false);
+    
+    // Reset UI
+    setImage(null);
+    setGeneratedImage(null);
+    setDescription(null);
+    setImageLoaded(false);
+    setError(null);
   };
   
   const handleDeleteConversation = async (index: number) => {
     if (!user) return;
     
     try {
-      if (index < 0 || index >= conversationsData.length) {
-        throw new Error('Invalid conversation index');
-      }
-      
-      // Show loading state
       setHistoryLoading(true);
       
-      const conversation = conversationsData[index];
+      // Get the conversation ID to delete
+      const conversationId = conversationsData[index]?.id;
+      if (!conversationId) {
+        console.error("Cannot delete conversation: ID not found");
+        return;
+      }
       
       // Delete from database
-      const success = await deleteConversation(conversation.id, user.id);
+      await deleteConversation(conversationId, user.id);
       
-      if (!success) {
-        throw new Error('Failed to delete conversation');
-      }
+      // Update UI
+      const updatedConversationsData = [...conversationsData];
+      updatedConversationsData.splice(index, 1);
+      setConversationsData(updatedConversationsData);
       
-      // Remove from local state
-      const newConversationsData = [...conversationsData];
-      newConversationsData.splice(index, 1);
-      setConversationsData(newConversationsData);
+      const updatedConversations = [...allConversations];
+      updatedConversations.splice(index, 1);
+      setAllConversations(updatedConversations);
       
-      const newAllConversations = [...allConversations];
-      if (index < newAllConversations.length) {
-        newAllConversations.splice(index, 1);
-        setAllConversations(newAllConversations);
-      }
+      // Update loaded conversation count
+      setLoadedConversationsCount(prev => Math.max(0, prev - 1));
       
-      // If we're deleting the current conversation, clear the UI
-      if (index === currentConversationIndex) {
-        handleReset();
+      // Check if we need to update hasMoreConversations
+      setHasMoreConversations(updatedConversationsData.length > updatedConversations.length);
+      
+      // Handle current conversation selection
+      if (currentConversationIndex === index) {
+        // We're deleting the active conversation
         setCurrentConversationIndex(-1);
         setCurrentConversationId(null);
-      } else if (index < currentConversationIndex) {
-        // Adjust the index if we're deleting a conversation before the current one
+        setHistory([]);
+        setGeneratedImage(null);
+        setImage(null);
+      } else if (currentConversationIndex > index) {
+        // We're deleting a conversation before the current one
         setCurrentConversationIndex(currentConversationIndex - 1);
       }
     } catch (error) {
@@ -544,6 +538,33 @@ export default function Home() {
     setSidebarExpanded(!sidebarExpanded);
   };
 
+  const handleLoadMoreConversations = async () => {
+    if (!user || !conversationsData || loadedConversationsCount >= conversationsData.length) {
+      return;
+    }
+    
+    setHistoryLoading(true);
+    
+    try {
+      const moreConversations: HistoryItem[][] = [...allConversations];
+      const nextBatchSize = Math.min(10, conversationsData.length - loadedConversationsCount);
+      
+      for (let i = loadedConversationsCount; i < loadedConversationsCount + nextBatchSize; i++) {
+        const history = await loadConversationAsHistory(conversationsData[i].id, user.id);
+        moreConversations.push(history);
+      }
+      
+      setAllConversations(moreConversations);
+      setLoadedConversationsCount(loadedConversationsCount + nextBatchSize);
+      setHasMoreConversations(loadedConversationsCount + nextBatchSize < conversationsData.length);
+    } catch (error) {
+      console.error('Failed to load more conversations:', error);
+      setError('Failed to load more conversations');
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+  
   const convertAndSaveConversation = async (history: HistoryItem[], conversationId: string | null = null) => {
     if (!user) return null;
     
@@ -723,295 +744,96 @@ export default function Home() {
 
   // Main UI render
   return (
-    <main className="min-h-screen flex items-center justify-center bg-[#0c0c0c] p-0">
-      {/* Sidebar components */}
-      <ChatSidebar 
-        conversations={allConversations}
-        currentConversationIndex={currentConversationIndex}
-        onSelectConversation={handleSelectConversation}
-        onClearHistory={handleClearHistory}
-        onDeleteConversation={handleDeleteConversation}
-        expanded={sidebarExpanded}
-        toggleSidebar={toggleSidebar}
-        isLoading={historyLoading}
-      />
-      
-      <SidebarToggle onClick={toggleSidebar} expanded={sidebarExpanded} />
-      
-      <div className={`transition-all duration-300 w-full flex justify-center h-screen overflow-hidden ${sidebarExpanded ? 'pl-72' : 'pl-0'}`}>
-        <div className="w-full max-w-7xl flex flex-col h-full">
-          <header className="h-16 border-b border-gray-800 flex items-center px-4 flex-shrink-0 bg-[#111111]">
-            <Button 
-              variant="ghost" 
-              size="icon" 
-              onClick={handleReset}
-              className="mr-auto h-8 w-8"
-              title="New Chat"
-            >
-              <Plus className="h-4 w-4" />
-            </Button>
-            <div className="flex items-center gap-2 text-white cursor-pointer" onClick={handleReset} title="New Chat">
-              <Wand2 className="w-6 h-6 text-blue-500" />
-              <h1 className="text-xl font-semibold">ImageCraft</h1>
-            </div>
-            <div className="ml-auto w-8" />
-          </header>
-          
-          {history.length === 0 ? (
-            // Initial upload view when no history
-            <div className="flex-1 overflow-hidden relative">
-              <div 
-                ref={scrollContainerRef} 
-                className="absolute inset-0 overflow-y-auto px-4 scroll-smooth"
-                style={{
-                  scrollbarWidth: 'thin',
-                  scrollbarColor: 'var(--border) transparent'
-                }}
-              >
-                <div className="min-h-full flex flex-col justify-center py-8">
-                  {error && (
-                    <div className="p-4 mb-4 text-sm text-red-700 bg-red-100 rounded-lg shadow-sm border border-red-200">
-                      {error}
-                    </div>
-                  )}
-
-                  <div className="flex flex-col items-center justify-center relative">
-                    <Card className="w-full max-w-4xl shadow-lg">
-                      <CardHeader className="pb-2">
-                        <CardTitle>
-                          {mode === "create" 
-                            ? "Create a new image with AI" 
-                            : "Upload an image to edit with AI"}
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent className="space-y-8 pt-6">
-                        {/* Mode Selection Tabs */}
-                        <div className="flex bg-[#111111] border border-gray-800 rounded-lg p-1">
-                          <button
-                            onClick={() => setMode("create")}
-                            className={`flex-1 py-2 rounded-md text-sm font-medium transition-colors ${
-                              mode === "create" 
-                                ? "bg-blue-600 text-white" 
-                                : "text-gray-400 hover:text-white"
-                            }`}
-                          >
-                            <Wand2 className="h-4 w-4 inline-block mr-2" />
-                            Create new image
-                          </button>
-                          <button
-                            onClick={() => setMode("edit")}
-                            className={`flex-1 py-2 rounded-md text-sm font-medium transition-colors ${
-                              mode === "edit" 
-                                ? "bg-blue-600 text-white" 
-                                : "text-gray-400 hover:text-white"
-                            }`}
-                          >
-                            <ImageIcon className="h-4 w-4 inline-block mr-2" />
-                            Edit existing image
-                          </button>
-                        </div>
-                        
-                        {/* Only show image upload in edit mode */}
-                        {mode === "edit" && (
-                          <ImageUpload
-                            onImageSelect={handleImageSelect}
-                            currentImage={currentImage}
-                          />
-                        )}
-                        
-                        <ImagePromptInput
-                          onSubmit={handlePromptSubmit}
-                          isEditing={isEditing || mode === "edit"}
-                          isLoading={loading}
-                        />
-                      </CardContent>
-                    </Card>
-
-                    {/* Loading overlay */}
-                    {loading && (
-                      <div className="absolute inset-0 bg-background/70 backdrop-blur-md flex flex-col items-center justify-center z-50">
-                        <div className="bg-card p-6 rounded-xl shadow-lg border border-border flex flex-col items-center space-y-4">
-                          <Loader2 className="h-10 w-10 text-primary animate-spin" />
-                          <p className="text-foreground font-medium text-center">
-                            {error?.includes("Loading image") 
-                              ? "Converting image for editing..." 
-                              : "Processing your request..."}
-                          </p>
-                          <p className="text-xs text-muted-foreground">
-                            {formatTime(loadingTime)}
-                          </p>
-                        </div>
+    <AppShell onNewProject={handleReset}>
+      <div className="min-h-screen flex items-center justify-center bg-[#0c0c0c] p-0">
+        {/* Sidebar components */}
+        <ChatSidebar 
+          conversations={allConversations}
+          currentConversationIndex={currentConversationIndex}
+          onSelectConversation={handleSelectConversation}
+          onClearHistory={handleClearHistory}
+          onDeleteConversation={handleDeleteConversation}
+          expanded={sidebarExpanded}
+          toggleSidebar={toggleSidebar}
+          isLoading={historyLoading}
+          onLoadMoreConversations={handleLoadMoreConversations}
+          hasMoreConversations={hasMoreConversations}
+        />
+        
+        <SidebarToggle onClick={toggleSidebar} expanded={sidebarExpanded} />
+        
+        <div className={`transition-all duration-300 w-full flex justify-center h-screen overflow-hidden ${sidebarExpanded ? 'pl-72' : 'pl-0'}`}>
+          <div className="w-full max-w-7xl flex flex-col h-full">
+            {history.length === 0 ? (
+              // Initial upload view when no history
+              <div className="flex-1 overflow-hidden relative">
+                <div 
+                  ref={scrollContainerRef} 
+                  className="absolute inset-0 overflow-y-auto px-4 scroll-smooth"
+                  style={{
+                    scrollbarWidth: 'thin',
+                    scrollbarColor: 'var(--border) transparent'
+                  }}
+                >
+                  <div className="min-h-full flex flex-col justify-center py-8">
+                    {error && (
+                      <div className="p-4 mb-4 text-sm text-red-700 bg-red-100 rounded-lg shadow-sm border border-red-200">
+                        {error}
                       </div>
                     )}
-                  </div>
-                </div>
-              </div>
-            </div>
-          ) : (
-            // Side-by-side layout when conversation has started
-            <div className="flex-1 flex overflow-hidden">
-              {/* Left side: Chat history and input */}
-              <div className="w-1/2 border-r border-gray-800 flex flex-col bg-[#111111] relative">
-                {/* Chat history */}
-                <div className="flex-1 overflow-hidden">
-                  <div 
-                    ref={scrollContainerRef} 
-                    className="absolute inset-0 overflow-y-auto px-4 scroll-smooth"
-                    style={{
-                      scrollbarWidth: 'thin',
-                      scrollbarColor: 'var(--border) transparent',
-                      paddingBottom: '130px'
-                    }}
-                  >
-                    <div className="min-h-full flex flex-col py-4">
-                      {error && (
-                        <div className="p-4 mb-4 text-sm text-red-700 bg-red-100 rounded-lg shadow-sm border border-red-200">
-                          {error}
-                        </div>
-                      )}
-                      
-                      {/* Conversation History Section */}
-                      <div className="pt-4 px-1 flex items-center justify-between">
-                        <div className="flex items-center space-x-2">
-                          <Clock className="h-4 w-4 text-primary/70" />
-                          <h3 className="text-sm font-semibold">Conversation History</h3>
-                        </div>
-                        <div className="text-xs text-muted-foreground">
-                          {history.length} messages
-                        </div>
-                      </div>
-                      
-                      <div className="p-2 space-y-4"
-                        style={{
-                          scrollbarWidth: 'thin',
-                          scrollbarColor: 'var(--border) transparent'
-                        }}
-                      >
-                        {history.map((item, itemIdx) => {
-                          const isUser = item.role === 'user';
-                          const hasImage = item.parts.some(part => part.image);
-                          const delayOffset = itemIdx * 100; // Staggered animation
-                          
-                          return (
-                            <div 
-                              key={itemIdx} 
-                              className={`flex ${isUser ? 'justify-end' : 'justify-start'} relative`}
-                              style={fadeInAnimation(delayOffset)}
+
+                    <div className="flex flex-col items-center justify-center relative">
+                      <Card className="w-full max-w-4xl shadow-lg">
+                        <CardHeader className="pb-2">
+                          <CardTitle>
+                            {mode === "create" 
+                              ? "Create a new image with AI" 
+                              : "Upload an image to edit with AI"}
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent className="space-y-8 pt-6">
+                          {/* Mode Selection Tabs */}
+                          <div className="flex bg-[#111111] border border-gray-800 rounded-lg p-1">
+                            <button
+                              onClick={() => setMode("create")}
+                              className={`flex-1 py-2 rounded-md text-sm font-medium transition-colors ${
+                                mode === "create" 
+                                  ? "bg-blue-600 text-white" 
+                                  : "text-gray-400 hover:text-white"
+                              }`}
                             >
-                              {/* Avatar/Icon */}
-                              {!isUser && (
-                                <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center mr-2 flex-shrink-0 mt-1 border border-primary/20">
-                                  <Sparkles className="h-4 w-4 text-primary" />
-                                </div>
-                              )}
-                              
-                              <div className={`${
-                                isUser 
-                                  ? 'bg-blue-600 text-white rounded-t-lg rounded-bl-lg' 
-                                  : 'bg-gray-800 text-white rounded-t-lg rounded-br-lg'
-                                } px-4 py-2.5 shadow-sm ${hasImage ? 'max-w-[300px]' : 'max-w-[85%]'}`}
-                              >
-                                {item.parts.map((part, partIdx) => (
-                                  <div key={partIdx}>
-                                    {part.text && (
-                                      <p className="text-sm leading-relaxed font-medium">
-                                        {part.text}
-                                      </p>
-                                    )}
-                                    {part.image && (
-                                      <div className="mt-2 mb-1 rounded-md overflow-hidden">
-                                        <img 
-                                          src={part.image} 
-                                          alt={`${isUser ? 'User' : 'AI'} image`}
-                                          className="w-full h-auto max-h-[180px] object-contain"
-                                          loading="lazy"
-                                        />
-                                      </div>
-                                    )}
-                                  </div>
-                                ))}
-                                
-                                {/* Message timestamp */}
-                                <div className="text-[10px] mt-1 text-gray-300 text-right">
-                                  {getMessageTime(itemIdx)}
-                                </div>
-                              </div>
-                              
-                              {/* User avatar */}
-                              {isUser && (
-                                <div className="w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center ml-2 flex-shrink-0 mt-1">
-                                  <User className="h-4 w-4 text-white" />
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
-                        <div ref={messagesEndRef} className="h-4" />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                
-                {/* Chat input fixed at bottom */}
-                <div className="absolute bottom-0 left-0 right-0 z-20 bg-[#111111] backdrop-blur-sm border-t border-gray-800 shadow-lg">
-                  <div className="w-full px-4 py-3">
-                    <ImagePromptInput
-                      onSubmit={handlePromptSubmit}
-                      isEditing={isEditing || mode === "edit"}
-                      isLoading={loading}
-                    />
-                  </div>
-                </div>
-              </div>
-              
-              {/* Right side: Current image display */}
-              <div className="w-1/2 flex flex-col bg-[#0c0c0c]">
-                <div className="flex-1 overflow-auto flex items-center justify-center p-6">
-                  <div className="h-full w-full flex flex-col">
-                    {/* Current image with loading state */}
-                    <div className="flex-1 overflow-hidden flex items-center justify-center relative p-4">
-                      {displayImage ? (
-                        <img 
-                          src={displayImage} 
-                          alt={description || "Generated image"} 
-                          className="max-w-full max-h-full object-contain image-preview"
-                          onLoad={() => {
-                            setImageLoaded(true);
-                            // Scroll to bottom after image loads
-                            setTimeout(scrollToBottom, 100);
-                          }}
-                        />
-                      ) : (
-                        <div className="text-gray-500 flex flex-col items-center justify-center">
-                          <FileImage className="h-16 w-16 mb-4 opacity-20" />
-                          <p>No image to display</p>
-                        </div>
-                      )}
-                      
-                      {/* Image Action Buttons */}
-                      {displayImage && (
-                        <div className="absolute bottom-3 right-3 flex items-center space-x-2">
-                          <Button
-                            onClick={() => handleDownloadImage(displayImage)}
-                            size="sm"
-                            variant="secondary"
-                            className="rounded-full bg-background/80 backdrop-blur-sm hover:bg-background shadow-md border border-border/50 hover-scale"
-                          >
-                            <Download className="h-4 w-4 mr-1" />
-                            <span>Save</span>
-                          </Button>
+                              <Wand2 className="h-4 w-4 inline-block mr-2" />
+                              Create new image
+                            </button>
+                            <button
+                              onClick={() => setMode("edit")}
+                              className={`flex-1 py-2 rounded-md text-sm font-medium transition-colors ${
+                                mode === "edit" 
+                                  ? "bg-blue-600 text-white" 
+                                  : "text-gray-400 hover:text-white"
+                              }`}
+                            >
+                              <ImageIcon className="h-4 w-4 inline-block mr-2" />
+                              Edit existing image
+                            </button>
+                          </div>
                           
-                          <Button
-                            onClick={handleCopyToClipboard}
-                            size="icon"
-                            variant="secondary"
-                            className="rounded-full size-8 bg-background/80 backdrop-blur-sm hover:bg-background shadow-md border border-border/50 hover-scale"
-                          >
-                            {copied ? <Sparkles className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
-                          </Button>
-                        </div>
-                      )}
-                      
+                          {/* Only show image upload in edit mode */}
+                          {mode === "edit" && (
+                            <ImageUpload
+                              onImageSelect={handleImageSelect}
+                              currentImage={currentImage}
+                            />
+                          )}
+                          
+                          <ImagePromptInput
+                            onSubmit={handlePromptSubmit}
+                            isEditing={isEditing || mode === "edit"}
+                            isLoading={loading}
+                          />
+                        </CardContent>
+                      </Card>
+
                       {/* Loading overlay */}
                       {loading && (
                         <div className="absolute inset-0 bg-background/70 backdrop-blur-md flex flex-col items-center justify-center z-50">
@@ -1029,21 +851,207 @@ export default function Home() {
                         </div>
                       )}
                     </div>
-                    
-                    {/* Description text */}
-                    {description && (
-                      <div className="mt-3 mx-4 px-3 py-2 bg-muted/30 rounded-lg border border-border/50">
-                        <p className="text-sm text-foreground">{description}</p>
-                      </div>
-                    )}
                   </div>
                 </div>
               </div>
-            </div>
-          )}
+            ) : (
+              // Side-by-side layout when conversation has started
+              <div className="flex-1 flex overflow-hidden">
+                {/* Left side: Chat history and input */}
+                <div className="w-1/2 border-r border-gray-800 flex flex-col bg-[#111111] relative">
+                  {/* Chat history */}
+                  <div className="flex-1 overflow-hidden">
+                    <div 
+                      ref={scrollContainerRef} 
+                      className="absolute inset-0 overflow-y-auto px-4 scroll-smooth"
+                      style={{
+                        scrollbarWidth: 'thin',
+                        scrollbarColor: 'var(--border) transparent',
+                        paddingBottom: '130px'
+                      }}
+                    >
+                      <div className="min-h-full flex flex-col py-4">
+                        {error && (
+                          <div className="p-4 mb-4 text-sm text-red-700 bg-red-100 rounded-lg shadow-sm border border-red-200">
+                            {error}
+                          </div>
+                        )}
+                        
+                        {/* Conversation History Section */}
+                        <div className="pt-4 px-1 flex items-center justify-between">
+                          <div className="flex items-center space-x-2">
+                            <Clock className="h-4 w-4 text-primary/70" />
+                            <h3 className="text-sm font-semibold">Conversation History</h3>
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            {history.length} messages
+                          </div>
+                        </div>
+                        
+                        <div className="p-2 space-y-4"
+                          style={{
+                            scrollbarWidth: 'thin',
+                            scrollbarColor: 'var(--border) transparent'
+                          }}
+                        >
+                          {history.map((item, itemIdx) => {
+                            const isUser = item.role === 'user';
+                            const hasImage = item.parts.some(part => part.image);
+                            const delayOffset = itemIdx * 100; // Staggered animation
+                            
+                            return (
+                              <div 
+                                key={itemIdx} 
+                                className={`flex ${isUser ? 'justify-end' : 'justify-start'} relative`}
+                                style={fadeInAnimation(delayOffset)}
+                              >
+                                {/* Avatar/Icon */}
+                                {!isUser && (
+                                  <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center mr-2 flex-shrink-0 mt-1 border border-primary/20">
+                                    <Sparkles className="h-4 w-4 text-primary" />
+                                  </div>
+                                )}
+                                
+                                <div className={`${
+                                  isUser 
+                                    ? 'bg-blue-600 text-white rounded-t-lg rounded-bl-lg' 
+                                    : 'bg-gray-800 text-white rounded-t-lg rounded-br-lg'
+                                  } px-4 py-2.5 shadow-sm ${hasImage ? 'max-w-[300px]' : 'max-w-[85%]'}`}
+                                >
+                                  {item.parts.map((part, partIdx) => (
+                                    <div key={partIdx}>
+                                      {part.text && (
+                                        <p className="text-sm leading-relaxed font-medium">
+                                          {part.text}
+                                        </p>
+                                      )}
+                                      {part.image && (
+                                        <div className="mt-2 mb-1 rounded-md overflow-hidden">
+                                          <img 
+                                            src={part.image} 
+                                            alt={`${isUser ? 'User' : 'AI'} image`}
+                                            className="w-full h-auto max-h-[180px] object-contain"
+                                            loading="lazy"
+                                          />
+                                        </div>
+                                      )}
+                                    </div>
+                                  ))}
+                                  
+                                  {/* Message timestamp */}
+                                  <div className="text-[10px] mt-1 text-gray-300 text-right">
+                                    {getMessageTime(itemIdx)}
+                                  </div>
+                                </div>
+                                
+                                {/* User avatar */}
+                                {isUser && (
+                                  <div className="w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center ml-2 flex-shrink-0 mt-1">
+                                    <User className="h-4 w-4 text-white" />
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                          <div ref={messagesEndRef} className="h-4" />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  {/* Chat input fixed at bottom */}
+                  <div className="absolute bottom-0 left-0 right-0 z-20 bg-[#111111] backdrop-blur-sm border-t border-gray-800 shadow-lg">
+                    <div className="w-full px-4 py-3">
+                      <ImagePromptInput
+                        onSubmit={handlePromptSubmit}
+                        isEditing={isEditing || mode === "edit"}
+                        isLoading={loading}
+                      />
+                    </div>
+                  </div>
+                </div>
+                
+                {/* Right side: Current image display */}
+                <div className="w-1/2 flex flex-col bg-[#0c0c0c]">
+                  <div className="flex-1 overflow-auto flex items-center justify-center p-6">
+                    <div className="h-full w-full flex flex-col">
+                      {/* Current image with loading state */}
+                      <div className="flex-1 overflow-hidden flex items-center justify-center relative p-4">
+                        {displayImage ? (
+                          <img 
+                            src={displayImage} 
+                            alt={description || "Generated image"} 
+                            className="max-w-full max-h-full object-contain image-preview"
+                            onLoad={() => {
+                              setImageLoaded(true);
+                              // Scroll to bottom after image loads
+                              setTimeout(scrollToBottom, 100);
+                            }}
+                          />
+                        ) : (
+                          <div className="text-gray-500 flex flex-col items-center justify-center">
+                            <FileImage className="h-16 w-16 mb-4 opacity-20" />
+                            <p>No image to display</p>
+                          </div>
+                        )}
+                        
+                        {/* Image Action Buttons */}
+                        {displayImage && (
+                          <div className="absolute bottom-3 right-3 flex items-center space-x-2">
+                            <Button
+                              onClick={() => handleDownloadImage(displayImage)}
+                              size="sm"
+                              variant="secondary"
+                              className="rounded-full bg-background/80 backdrop-blur-sm hover:bg-background shadow-md border border-border/50 hover-scale"
+                            >
+                              <Download className="h-4 w-4 mr-1" />
+                              <span>Save</span>
+                            </Button>
+                            
+                            <Button
+                              onClick={handleCopyToClipboard}
+                              size="icon"
+                              variant="secondary"
+                              className="rounded-full size-8 bg-background/80 backdrop-blur-sm hover:bg-background shadow-md border border-border/50 hover-scale"
+                            >
+                              {copied ? <Sparkles className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
+                            </Button>
+                          </div>
+                        )}
+                        
+                        {/* Loading overlay */}
+                        {loading && (
+                          <div className="absolute inset-0 bg-background/70 backdrop-blur-md flex flex-col items-center justify-center z-50">
+                            <div className="bg-card p-6 rounded-xl shadow-lg border border-border flex flex-col items-center space-y-4">
+                              <Loader2 className="h-10 w-10 text-primary animate-spin" />
+                              <p className="text-foreground font-medium text-center">
+                                {error?.includes("Loading image") 
+                                  ? "Converting image for editing..." 
+                                  : "Processing your request..."}
+                              </p>
+                              <p className="text-xs text-muted-foreground">
+                                {formatTime(loadingTime)}
+                              </p>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                      
+                      {/* Description text */}
+                      {description && (
+                        <div className="mt-3 mx-4 px-3 py-2 bg-muted/30 rounded-lg border border-border/50">
+                          <p className="text-sm text-foreground">{description}</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
-    </main>
+    </AppShell>
   );
 }
 

@@ -15,6 +15,8 @@ interface ChatSidebarProps {
   expanded: boolean;
   toggleSidebar: () => void;
   isLoading?: boolean;
+  onLoadMoreConversations?: () => void;
+  hasMoreConversations?: boolean;
 }
 
 export function ChatSidebar({
@@ -26,6 +28,8 @@ export function ChatSidebar({
   expanded,
   toggleSidebar,
   isLoading = false,
+  onLoadMoreConversations,
+  hasMoreConversations = false,
 }: ChatSidebarProps) {
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
@@ -178,6 +182,20 @@ export function ChatSidebar({
                 </div>
               );
             })
+          )}
+          
+          {!isLoading && hasMoreConversations && onLoadMoreConversations && (
+            <div className="pt-2 pb-2 flex justify-center">
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={onLoadMoreConversations}
+                className="w-full mx-2 text-xs"
+              >
+                <Plus className="h-3.5 w-3.5 mr-1" />
+                Show More
+              </Button>
+            </div>
           )}
         </div>
       </ScrollArea>
